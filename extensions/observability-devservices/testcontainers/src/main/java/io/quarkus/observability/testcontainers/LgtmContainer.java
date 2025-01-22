@@ -7,6 +7,9 @@ import java.util.function.Predicate;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.testcontainers.containers.output.OutputFrame;
+import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.containers.wait.strategy.WaitAllStrategy;
+import org.testcontainers.containers.wait.strategy.WaitStrategy;
 import org.testcontainers.utility.MountableFile;
 
 import io.quarkus.observability.common.ContainerConstants;
@@ -93,6 +96,16 @@ public class LgtmContainer extends GrafanaContainer<LgtmContainer, LgtmConfig> {
     }
 
     @Override
+    protected WaitStrategy waitStrategy() {
+        return new WaitAllStrategy()
+                .withStartupTimeout(config.timeout())
+                .withStrategy(super.waitStrategy())
+                .withStrategy(
+                        Wait.forLogMessage(".*The OpenTelemetry collector and the Grafana LGTM stack are up and running.*", 1)
+                                .withStartupTimeout(config.timeout()));
+    }
+
+    @Override
     protected String prefix() {
         return "LGTM";
     }
@@ -107,18 +120,22 @@ public class LgtmContainer extends GrafanaContainer<LgtmContainer, LgtmConfig> {
     }
 
     public int getOtlpPort() {
-        int port = getOtlpPortInternal();
+        int port = getPrivateOtlpPort();
         return getMappedPort(port);
     }
 
-    private int getOtlpPortInternal() {
+    private int getPrivateOtlpPort() {
+        return getPrivateOtlpPort(getOtlpProtocol());
+    }
+
+    public static int getPrivateOtlpPort(String otlpProtocol) {
         // use ignore-case here; grpc == gRPC
-        if (ContainerConstants.OTEL_GRPC_PROTOCOL.equalsIgnoreCase(getOtlpProtocol())) {
+        if (ContainerConstants.OTEL_GRPC_PROTOCOL.equalsIgnoreCase(otlpProtocol)) {
             return ContainerConstants.OTEL_GRPC_EXPORTER_PORT;
-        } else if (ContainerConstants.OTEL_HTTP_PROTOCOL.equals(getOtlpProtocol())) {
+        } else if (ContainerConstants.OTEL_HTTP_PROTOCOL.equals(otlpProtocol)) {
             return ContainerConstants.OTEL_HTTP_EXPORTER_PORT;
         } else {
-            throw new IllegalArgumentException("Unsupported OTEL protocol: " + getOtlpProtocol());
+            throw new IllegalArgumentException("Unsupported OTEL protocol: " + otlpProtocol);
         }
     }
 
