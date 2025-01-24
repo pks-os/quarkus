@@ -50,7 +50,7 @@
         <smallrye-config.version>3.11.1</smallrye-config.version>
         <smallrye-health.version>4.1.1</smallrye-health.version>
         <smallrye-metrics.version>4.0.0</smallrye-metrics.version>
-        <smallrye-open-api.version>4.0.6</smallrye-open-api.version>
+        <smallrye-open-api.version>4.0.7</smallrye-open-api.version>
         <smallrye-graphql.version>2.12.0</smallrye-graphql.version>
         <smallrye-fault-tolerance.version>6.7.3</smallrye-fault-tolerance.version>
         <smallrye-jwt.version>4.6.1</smallrye-jwt.version>
@@ -502,7 +502,7 @@
             <dependency>
                 <groupId>org.jetbrains</groupId>
                 <artifactId>annotations</artifactId>
-                <version>26.0.1</version>
+                <version>26.0.2</version>
             </dependency>
             <!-- Kotlin Coroutines BOM -->
             <dependency>
@@ -3197,6 +3197,16 @@
             <dependency>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-micrometer</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-micrometer-opentelemetry-deployment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-micrometer-opentelemetry</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
