@@ -3,6 +3,7 @@ package io.quarkus.deployment.configuration;
 import static io.quarkus.deployment.util.ReflectUtil.reportError;
 import static io.quarkus.runtime.annotations.ConfigPhase.BUILD_AND_RUN_TIME_FIXED;
 import static io.quarkus.runtime.annotations.ConfigPhase.RUN_TIME;
+import static io.smallrye.config.common.utils.StringUtil.skewer;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -99,10 +100,10 @@ public final class RunTimeConfigurationGenerator {
     static final MethodDescriptor CD_MISSING_VALUE = MethodDescriptor.ofMethod(ConfigDiagnostic.class, "missingValue",
             void.class, String.class, NoSuchElementException.class);
     static final MethodDescriptor CD_RESET_ERROR = MethodDescriptor.ofMethod(ConfigDiagnostic.class, "resetError", void.class);
-    static final MethodDescriptor CD_UNKNOWN_PROPERTIES = MethodDescriptor.ofMethod(ConfigDiagnostic.class, "unknownProperties",
+    static final MethodDescriptor CD_REPORT_UNKNOWN = MethodDescriptor.ofMethod(ConfigDiagnostic.class, "reportUnknown",
             void.class, Set.class);
-    static final MethodDescriptor CD_UNKNOWN_PROPERTIES_RT = MethodDescriptor.ofMethod(ConfigDiagnostic.class,
-            "unknownPropertiesRuntime", void.class, Set.class);
+    static final MethodDescriptor CD_REPORT_UNKNOWN_RUNTIME = MethodDescriptor.ofMethod(ConfigDiagnostic.class,
+            "reportUnknownRuntime", void.class, Set.class);
 
     static final MethodDescriptor CONVS_NEW_ARRAY_CONVERTER = MethodDescriptor.ofMethod(Converters.class,
             "newArrayConverter", Converter.class, Converter.class, Class.class);
@@ -449,14 +450,14 @@ public final class RunTimeConfigurationGenerator {
 
             // generate sweep for clinit
             configSweepLoop(siParserBody, clinit, clinitConfig, getRegisteredRoots(BUILD_AND_RUN_TIME_FIXED), Type.BUILD_TIME);
-            clinit.invokeStaticMethod(CD_UNKNOWN_PROPERTIES, clinit.readStaticField(C_UNKNOWN));
+            clinit.invokeStaticMethod(CD_REPORT_UNKNOWN, clinit.readStaticField(C_UNKNOWN));
 
             if (liveReloadPossible) {
                 configSweepLoop(siParserBody, readConfig, runTimeConfig, getRegisteredRoots(RUN_TIME), Type.RUNTIME);
             }
             // generate sweep for run time
             configSweepLoop(rtParserBody, readConfig, runTimeConfig, getRegisteredRoots(RUN_TIME), Type.RUNTIME);
-            readConfig.invokeStaticMethod(CD_UNKNOWN_PROPERTIES_RT, readConfig.readStaticField(C_UNKNOWN_RUNTIME));
+            readConfig.invokeStaticMethod(CD_REPORT_UNKNOWN_RUNTIME, readConfig.readStaticField(C_UNKNOWN_RUNTIME));
 
             // generate ensure-initialized method
             // the point of this method is simply to initialize the Config class
@@ -1231,7 +1232,8 @@ public final class RunTimeConfigurationGenerator {
                     BranchResult nextEquals = hasNextTrue
                             .ifTrue(hasNextTrue.invokeStaticMethod(PU_IS_MAPPED, nameIterator, hasNextTrue.load(childName)));
                     try (BytecodeCreator nextEqualsTrue = nextEquals.trueBranch()) {
-                        String childMethodName = methodName + "$" + childName.replace("[*]", "-collection");
+                        childName = childName.replace("[*]", "-collection");
+                        String childMethodName = methodName + "$" + skewer(childName, '_');
                         if (child.getMatched() == null) {
                             generateIsMapped(childMethodName, child);
                             nextEqualsTrue.invokeVirtualMethod(NI_NEXT, nameIterator);

@@ -94,8 +94,8 @@ public class JibProcessor {
     private static final IsClassPredicate IS_CLASS_PREDICATE = new IsClassPredicate();
     private static final String BINARY_NAME_IN_CONTAINER = "application";
 
-    // The source for this can be found at https://github.com/jboss-container-images/openjdk/blob/ubi8/modules/run/artifacts/opt/jboss/container/java/run/run-java.sh
-    // A list of env vars that affect this script can be found at https://jboss-container-images.github.io/openjdk/ubi8/ubi8-openjdk-17.html
+    // The source for this can be found at https://github.com/jboss-container-images/openjdk/blob/ubi9/modules/run/artifacts/opt/jboss/container/java/run/run-java.sh
+    // A list of env vars that affect this script can be found at https://rh-openjdk.github.io/redhat-openjdk-containers/ubi9/ubi9-openjdk-17.html
     private static final String RUN_JAVA_PATH = "/opt/jboss/container/java/run/run-java.sh";
 
     private static final String DEFAULT_BASE_IMAGE_USER = "185";
@@ -268,8 +268,8 @@ public class JibProcessor {
             if (imageReference.getRegistry() == null) {
                 log.info("No container image registry was set, so 'docker.io' will be used");
             }
-            RegistryImage registryImage = toRegistryImage(imageReference, containerImageConfig.username,
-                    containerImageConfig.password);
+            RegistryImage registryImage = toRegistryImage(imageReference, containerImageConfig.username(),
+                    containerImageConfig.password());
             containerizer = Containerizer.to(registryImage);
         } else {
             DockerDaemonImage dockerDaemonImage = DockerDaemonImage.named(imageReference);
@@ -296,7 +296,7 @@ public class JibProcessor {
                 log.log(toJBossLoggingLevel(e.getLevel()), e.getMessage());
             }
         });
-        containerizer.setAllowInsecureRegistries(containerImageConfig.insecure);
+        containerizer.setAllowInsecureRegistries(containerImageConfig.insecure());
         containerizer.setAlwaysCacheBaseImage(jibConfig.alwaysCacheBaseImage());
         containerizer.setOfflineMode(jibConfig.offlineMode());
         jibConfig.baseImageLayersCache().ifPresent(cacheDir -> containerizer.setBaseImageLayersCache(Paths.get(cacheDir)));
@@ -680,20 +680,22 @@ public class JibProcessor {
     }
 
     private List<String> determineEffectiveJvmArguments(ContainerImageJibConfig jibConfig,
-            Optional<AppCDSResultBuildItem> appCDSResult,
+            Optional<AppCDSResultBuildItem> maybeAppCDSResult,
             boolean isMutableJar) {
         List<String> effectiveJvmArguments = new ArrayList<>(jibConfig.jvmArguments());
         jibConfig.jvmAdditionalArguments().ifPresent(effectiveJvmArguments::addAll);
-        if (appCDSResult.isPresent()) {
+        if (maybeAppCDSResult.isPresent()) {
+            AppCDSResultBuildItem appCDSResult = maybeAppCDSResult.get();
             boolean containsAppCDSOptions = false;
             for (String effectiveJvmArgument : effectiveJvmArguments) {
-                if (effectiveJvmArgument.startsWith("-XX:SharedArchiveFile")) {
+                if (effectiveJvmArgument.startsWith(appCDSResult.getType().getJvmFlag())) {
                     containsAppCDSOptions = true;
                     break;
                 }
             }
             if (!containsAppCDSOptions) {
-                effectiveJvmArguments.add("-XX:SharedArchiveFile=" + appCDSResult.get().getAppCDS().getFileName().toString());
+                effectiveJvmArguments
+                        .add(appCDSResult.getType().getJvmFlag() + "=" + appCDSResult.getAppCDS().getFileName().toString());
             }
         }
         if (isMutableJar) {
@@ -867,11 +869,11 @@ public class JibProcessor {
 
     private Map<String, String> allLabels(ContainerImageJibConfig jibConfig, ContainerImageConfig containerImageConfig,
             List<ContainerImageLabelBuildItem> containerImageLabels) {
-        if (containerImageLabels.isEmpty() && containerImageConfig.labels.isEmpty()) {
+        if (containerImageLabels.isEmpty() && containerImageConfig.labels().isEmpty()) {
             return Collections.emptyMap();
         }
 
-        final Map<String, String> allLabels = new HashMap<>(containerImageConfig.labels);
+        final Map<String, String> allLabels = new HashMap<>(containerImageConfig.labels());
         for (ContainerImageLabelBuildItem containerImageLabel : containerImageLabels) {
             // we want the user supplied labels to take precedence so the user can override labels generated from other extensions if desired
             allLabels.putIfAbsent(containerImageLabel.getName(), containerImageLabel.getValue());

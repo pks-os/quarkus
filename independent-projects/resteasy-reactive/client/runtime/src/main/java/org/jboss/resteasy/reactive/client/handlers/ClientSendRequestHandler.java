@@ -76,10 +76,13 @@ public class ClientSendRequestHandler implements ClientRestHandler {
     private final ClientLogger clientLogger;
     private final Map<Class<?>, MultipartResponseData> multipartResponseDataMap;
     private final int maxChunkSize;
+    private final int inputStreamChunkSize;
 
-    public ClientSendRequestHandler(int maxChunkSize, boolean followRedirects, LoggingScope loggingScope, ClientLogger logger,
+    public ClientSendRequestHandler(int maxChunkSize, int inputStreamChunkSize, boolean followRedirects,
+            LoggingScope loggingScope, ClientLogger logger,
             Map<Class<?>, MultipartResponseData> multipartResponseDataMap) {
         this.maxChunkSize = maxChunkSize;
+        this.inputStreamChunkSize = inputStreamChunkSize;
         this.followRedirects = followRedirects;
         this.loggingScope = loggingScope;
         this.clientLogger = logger;
@@ -98,6 +101,8 @@ public class ClientSendRequestHandler implements ClientRestHandler {
         future.subscribe().with(new Consumer<>() {
             @Override
             public void accept(HttpClientRequest httpClientRequest) {
+                requestContext.setHttpClientRequest(httpClientRequest);
+
                 // adapt headers to HTTP/2 depending on the underlying HTTP connection
                 ClientSendRequestHandler.this.adaptRequest(httpClientRequest);
 
@@ -175,7 +180,7 @@ public class ClientSendRequestHandler implements ClientRestHandler {
                     Future<HttpClientResponse> sent = httpClientRequest.send(
                             new InputStreamReadStream(
                                     Vertx.currentContext().owner(), (InputStream) requestContext.getEntity().getEntity(),
-                                    httpClientRequest));
+                                    httpClientRequest, inputStreamChunkSize));
                     attachSentHandlers(sent, httpClientRequest, requestContext);
                 } else if (requestContext.isMultiBufferUpload()) {
                     MultivaluedMap<String, String> headerMap = requestContext.getRequestHeadersAsMap();

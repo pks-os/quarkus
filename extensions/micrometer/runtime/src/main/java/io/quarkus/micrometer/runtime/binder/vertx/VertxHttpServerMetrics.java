@@ -22,6 +22,7 @@ import io.quarkus.micrometer.runtime.binder.HttpBinderConfiguration;
 import io.quarkus.micrometer.runtime.binder.HttpCommonTags;
 import io.quarkus.micrometer.runtime.export.exemplars.OpenTelemetryContextUnwrapper;
 import io.vertx.core.http.HttpMethod;
+import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.spi.metrics.HttpServerMetrics;
@@ -53,14 +54,22 @@ public class VertxHttpServerMetrics extends VertxTcpServerMetrics
 
     VertxHttpServerMetrics(MeterRegistry registry,
             HttpBinderConfiguration config,
-            OpenTelemetryContextUnwrapper openTelemetryContextUnwrapper) {
+            OpenTelemetryContextUnwrapper openTelemetryContextUnwrapper, HttpServerOptions httpServerOptions) {
         super(registry, "http.server", null);
         this.config = config;
         this.openTelemetryContextUnwrapper = openTelemetryContextUnwrapper;
 
         activeRequests = new LongAdder();
-        Gauge.builder(config.getHttpServerActiveRequestsName(), activeRequests, LongAdder::doubleValue)
-                .register(registry);
+        Gauge.Builder<LongAdder> activeRequestsBuilder = Gauge
+                .builder(config.getHttpServerActiveRequestsName(), activeRequests, LongAdder::doubleValue)
+                .tag("url.scheme", httpServerOptions.isSsl() ? "https" : "http");
+        // we add a port tag (the one the application should actually bind to on the network host,
+        // not the public one which we can't know easily) only if it's not random
+        if (httpServerOptions.getPort() > 0) {
+            activeRequestsBuilder
+                    .tag("server.port", "" + httpServerOptions.getPort());
+        }
+        activeRequestsBuilder.register(registry);
 
         httpServerMetricsTagsContributors = resolveHttpServerMetricsTagsContributors();
 

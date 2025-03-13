@@ -10,8 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,13 +47,13 @@ public class QuarkusUpdateCommand {
     }
 
     public static void handle(MessageWriter log, BuildTool buildTool, Path baseDir,
-            String rewritePluginVersion, String recipesGAV, Path recipe, boolean dryRun) {
+            String rewritePluginVersion, String recipesGAV, Path recipe, Path logFile, boolean dryRun) {
         switch (buildTool) {
             case MAVEN:
-                runMavenUpdate(log, baseDir, rewritePluginVersion, recipesGAV, recipe, dryRun);
+                runMavenUpdate(log, baseDir, rewritePluginVersion, recipesGAV, recipe, logFile, dryRun);
                 break;
             case GRADLE:
-                runGradleUpdate(log, baseDir, rewritePluginVersion, recipesGAV, recipe, dryRun);
+                runGradleUpdate(log, baseDir, rewritePluginVersion, recipesGAV, recipe, logFile, dryRun);
                 break;
             default:
                 throw new QuarkusUpdateException(buildTool.getKey() + " is not supported yet");
@@ -60,18 +62,26 @@ public class QuarkusUpdateCommand {
 
     private static void runMavenUpdate(MessageWriter log, Path baseDir, String rewritePluginVersion, String recipesGAV,
             Path recipe,
-            boolean dryRun) {
+            Path logFile, boolean dryRun) {
         final String mvnBinary = findMvnBinary(baseDir);
-        executeCommand(baseDir, getMavenUpdateCommand(mvnBinary, rewritePluginVersion, recipesGAV, recipe, dryRun), log);
+        Map<String, List<String>> commands = new LinkedHashMap<>();
+        commands.put(getRewriteCommandName(rewritePluginVersion, dryRun),
+                getMavenUpdateCommand(mvnBinary, rewritePluginVersion, recipesGAV, recipe, dryRun));
 
         // format the sources
         if (!dryRun) {
-            executeCommand(baseDir, getMavenProcessSourcesCommand(mvnBinary), log);
+            commands.put("process-sources", getMavenProcessSourcesCommand(mvnBinary));
         }
+
+        executeRewrite(baseDir, commands, log, logFile);
+    }
+
+    private static String getRewriteCommandName(String rewritePluginVersion, boolean dryRun) {
+        return "OpenRewrite %s%s".formatted(dryRun ? " in dry mode" : "", rewritePluginVersion);
     }
 
     private static void runGradleUpdate(MessageWriter log, Path baseDir, String rewritePluginVersion, String recipesGAV,
-            Path recipe, boolean dryRun) {
+            Path recipe, Path logFile, boolean dryRun) {
         Path tempInit = null;
         try {
             tempInit = Files.createTempFile("openrewrite-init", "gradle");
@@ -100,7 +110,9 @@ public class QuarkusUpdateCommand {
             List<String> command = List.of(gradleBinary.toString(), "--console", "plain", "--stacktrace",
                     "--init-script",
                     tempInit.toAbsolutePath().toString(), dryRun ? "rewriteDryRun" : "rewriteRun");
-            executeCommand(baseDir, command, log);
+            Map<String, List<String>> commands = new LinkedHashMap<>();
+            commands.put(getRewriteCommandName(rewritePluginVersion, dryRun), command);
+            executeRewrite(baseDir, commands, log, logFile);
         } catch (QuarkusUpdateException e) {
             throw e;
         } catch (Exception e) {
@@ -142,6 +154,7 @@ public class QuarkusUpdateCommand {
         List<String> command = new ArrayList<>();
         command.add(mvnBinary);
         command.add("-B");
+        command.add("-e");
         command.add("clean");
         command.add("process-sources");
         final String mavenSettings = getMavenSettingsArg();
@@ -175,69 +188,97 @@ public class QuarkusUpdateCommand {
         return command;
     }
 
-    private static void executeCommand(Path baseDir, List<String> command, MessageWriter log) {
-        final List<String> effectiveCommand = new ArrayList<>(command);
-        propagateSystemPropertyIfSet("maven.repo.local", effectiveCommand);
-        ProcessBuilder processBuilder = new ProcessBuilder();
-        log.info("");
-        log.info("");
+    private static void executeRewrite(Path baseDir, Map<String, List<String>> commands, MessageWriter log, Path logFile) {
+
         log.info("");
         log.info(" ------------------------------------------------------------------------");
-        log.info("Executing:\n" + String.join(" ", effectiveCommand));
+
         log.info("");
+
+        String logInfo = logFile != null ? "Logs can be found at: %s".formatted(baseDir.relativize(logFile).toString())
+                : "See the execution logs above for more details";
+
+        log.info("Update in progress (this may take a while):");
+        for (Map.Entry<String, List<String>> e : commands.entrySet()) {
+            log.info("  - executing " + e.getKey() + " command...");
+            execute(e.getKey(), e.getValue(), log, logFile, logInfo);
+        }
+        log.info("");
+        log.info("Rewrite process completed. " + logInfo);
+        log.info("");
+
+    }
+
+    private static void execute(String name, List<String> command, MessageWriter log, Path logFile, String logInfo) {
+
+        final List<String> effectiveCommand = prepareCommand(command);
+
+        ProcessBuilder processBuilder = new ProcessBuilder();
         processBuilder.command(effectiveCommand);
 
         try {
-            Process process = processBuilder.redirectOutput(ProcessBuilder.Redirect.PIPE)
-                    .redirectError(ProcessBuilder.Redirect.PIPE).start();
-
-            BufferedReader inputReader = new BufferedReader(new java.io.InputStreamReader(process.getInputStream()));
-            BufferedReader errorReader = new BufferedReader(new java.io.InputStreamReader(process.getErrorStream()));
-
-            String line;
-            LogLevel currentLogLevel = LogLevel.UNKNOWN;
-
-            while ((line = inputReader.readLine()) != null) {
-                Optional<LogLevel> detectedLogLevel = LogLevel.of(line);
-                if (detectedLogLevel.isPresent()) {
-                    currentLogLevel = detectedLogLevel.get();
-                }
-                switch (currentLogLevel) {
-                    case ERROR:
-                        log.error(currentLogLevel.clean(line));
-                        break;
-                    case WARNING:
-                        log.warn(currentLogLevel.clean(line));
-                        break;
-                    case INFO:
-                        log.info(currentLogLevel.clean(line));
-                        break;
-                    case UNKNOWN:
-                    default:
-                        log.info(line);
-                        break;
-                }
-            }
-            while ((line = errorReader.readLine()) != null) {
-                log.error(line);
+            if (logFile != null) {
+                Files.writeString(logFile, "\n\n\nRunning: " + String.join(" ", effectiveCommand) + "\n",
+                        StandardOpenOption.APPEND, StandardOpenOption.CREATE);
             }
 
-            log.info("");
-            log.info("");
-            log.info("");
+            ProcessBuilder.Redirect redirect = logFile != null ? ProcessBuilder.Redirect.appendTo(logFile.toFile())
+                    : ProcessBuilder.Redirect.PIPE;
+            Process process = processBuilder.redirectOutput(redirect)
+                    .redirectError(redirect).start();
+
+            if (logFile == null) {
+                BufferedReader inputReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+
+                String line;
+                LogLevel currentLogLevel = LogLevel.UNKNOWN;
+
+                while ((line = inputReader.readLine()) != null) {
+                    Optional<LogLevel> detectedLogLevel = LogLevel.of(line);
+                    if (detectedLogLevel.isPresent()) {
+                        currentLogLevel = detectedLogLevel.get();
+                    }
+                    switch (currentLogLevel) {
+                        case ERROR:
+                            log.error(currentLogLevel.clean(line));
+                            break;
+                        case WARNING:
+                            log.warn(currentLogLevel.clean(line));
+                            break;
+                        case INFO:
+                            log.info(currentLogLevel.clean(line));
+                            break;
+                        case UNKNOWN:
+                        default:
+                            log.info(line);
+                            break;
+                    }
+                }
+                while ((line = errorReader.readLine()) != null) {
+                    log.error(line);
+                }
+
+                log.info("");
+
+            }
 
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                throw new QuarkusUpdateExitErrorException(
-                        "The command to update the project exited with an error, see the execution logs above for more details");
+                log.info("");
+                throw new QuarkusUpdateExitErrorException("The %s command exited with an error. %s".formatted(name, logInfo));
             }
         } catch (QuarkusUpdateException e) {
             throw e;
         } catch (Exception e) {
-            throw new QuarkusUpdateException(
-                    "Error while executing the command to update the project, see the execution logs above for more details",
-                    e);
+            throw new QuarkusUpdateException("The %s command exited with an error. %s".formatted(name, logInfo), e);
         }
+    }
+
+    private static List<String> prepareCommand(List<String> command) {
+        final List<String> effectiveCommand = new ArrayList<>(command);
+        propagateSystemPropertyIfSet("maven.repo.local", effectiveCommand);
+        return effectiveCommand;
     }
 
     static String findMvnBinary(Path baseDir) {

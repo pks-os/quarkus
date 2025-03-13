@@ -13,7 +13,6 @@ import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.ConfigurationBuildItem;
 import io.quarkus.deployment.builditem.RuntimeConfigSetupCompleteBuildItem;
 import io.quarkus.devservices.keycloak.KeycloakAdminPageBuildItem;
 import io.quarkus.devservices.keycloak.KeycloakDevServicesConfigBuildItem;
@@ -27,7 +26,7 @@ import io.quarkus.oidc.runtime.devui.OidcDevLoginObserver;
 import io.quarkus.oidc.runtime.devui.OidcDevUiRecorder;
 import io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.RouteBuildItem;
-import io.quarkus.vertx.http.runtime.HttpConfiguration;
+import io.quarkus.vertx.http.runtime.VertxHttpConfig;
 
 public class KeycloakDevUIProcessor extends AbstractDevUIProcessor {
 
@@ -38,11 +37,10 @@ public class KeycloakDevUIProcessor extends AbstractDevUIProcessor {
     @Consume(RuntimeConfigSetupCompleteBuildItem.class)
     void produceProviderComponent(Optional<KeycloakDevServicesConfigBuildItem> configProps,
             BuildProducer<KeycloakAdminPageBuildItem> keycloakAdminPageProducer,
-            HttpConfiguration httpConfiguration,
+            VertxHttpConfig httpConfig,
             OidcDevUiRecorder recorder,
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
             BeanContainerBuildItem beanContainer,
-            ConfigurationBuildItem configurationBuildItem,
             Capabilities capabilities) {
         final String keycloakAdminUrl = KeycloakDevServicesConfigBuildItem.getKeycloakUrl(configProps);
         if (keycloakAdminUrl != null) {
@@ -67,12 +65,11 @@ public class KeycloakDevUIProcessor extends AbstractDevUIProcessor {
                     oidcConfig.devui().webClientTimeout(),
                     oidcConfig.devui().grantOptions(),
                     nonApplicationRootPathBuildItem,
-                    configurationBuildItem,
                     keycloakAdminUrl,
                     users,
                     keycloakRealms,
                     configProps.get().isContainerRestarted(),
-                    httpConfiguration, false, null);
+                    httpConfig, false, null);
             // use same card page so that both pages appear on the same card
             var keycloakAdminPageItem = new KeycloakAdminPageBuildItem(cardPageBuildItem);
             keycloakAdminPageProducer.produce(keycloakAdminPageItem);

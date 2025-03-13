@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
@@ -426,7 +427,7 @@ public class QuteProcessor {
                     continue;
                 }
                 MethodInfo canonicalConstructor = recordClass.method(MethodDescriptor.INIT,
-                        recordClass.unsortedRecordComponents().stream().map(RecordComponentInfo::type)
+                        recordClass.recordComponentsInDeclarationOrder().stream().map(RecordComponentInfo::type)
                                 .toArray(Type[]::new));
 
                 AnnotationInstance checkedTemplateAnnotation = recordClass.declaredAnnotation(Names.CHECKED_TEMPLATE);
@@ -801,7 +802,7 @@ public class QuteProcessor {
     }
 
     private String templatePathWithoutSuffix(String path, QuteConfig config) {
-        for (String suffix : config.suffixes) {
+        for (String suffix : config.suffixes()) {
             if (path.endsWith(suffix)) {
                 // Remove the suffix
                 path = path.substring(0, path.length() - (suffix.length() + 1));
@@ -910,7 +911,7 @@ public class QuteProcessor {
 
     @BuildStep(onlyIf = IsTest.class)
     SyntheticBeanBuildItem registerRenderedResults(QuteConfig config) {
-        if (config.testMode.recordRenderedResults) {
+        if (config.testMode().recordRenderedResults()) {
             return SyntheticBeanBuildItem.configure(RenderedResults.class)
                     .unremovable()
                     .scope(Singleton.class)
@@ -1130,7 +1131,7 @@ public class QuteProcessor {
             List<CheckedTemplateBuildItem> checkedTemplates) {
         // Try to find the checked template
         String path = analysis.path;
-        for (String suffix : config.suffixes) {
+        for (String suffix : config.suffixes()) {
             if (path.endsWith(suffix)) {
                 path = path.substring(0, path.length() - (suffix.length() + 1));
                 break;
@@ -1385,12 +1386,8 @@ public class QuteProcessor {
                         ignoring = true;
                     }
                 } else {
-                    // No global and no namespace extension method found - incorrect expression
-                    incorrectExpressions.produce(new IncorrectExpressionBuildItem(expression.toOriginalString(),
-                            String.format("No matching namespace [%s] extension method found", namespace.namespace),
-                            expression.getOrigin()));
+                    // No global and no namespace extension method found - just ignore the expression
                     match.clearValues();
-                    putResult(match, results, expression);
                     ignoring = true;
                 }
             }
@@ -1637,19 +1634,19 @@ public class QuteProcessor {
             if (!expression.hasNamespace() && expression.getParts().size() == 1
                     && ITERATION_METADATA_KEYS.contains(expression.getParts().get(0).getName())) {
                 String prefixInfo;
-                if (config.iterationMetadataPrefix
+                if (config.iterationMetadataPrefix()
                         .equals(LoopSectionHelper.Factory.ITERATION_METADATA_PREFIX_ALIAS_UNDERSCORE)) {
                     prefixInfo = String.format(
                             "based on the iteration alias, i.e. the correct key should be something like {it_%1$s} or {element_%1$s}",
                             expression.getParts().get(0).getName());
-                } else if (config.iterationMetadataPrefix
+                } else if (config.iterationMetadataPrefix()
                         .equals(LoopSectionHelper.Factory.ITERATION_METADATA_PREFIX_ALIAS_QM)) {
                     prefixInfo = String.format(
                             "based on the iteration alias, i.e. the correct key should be something like {it?%1$s} or {element?%1$s}",
                             expression.getParts().get(0).getName());
                 } else {
-                    prefixInfo = ": " + config.iterationMetadataPrefix + ", i.e. the correct key should be: "
-                            + config.iterationMetadataPrefix + expression.getParts().get(0).getName();
+                    prefixInfo = ": " + config.iterationMetadataPrefix() + ", i.e. the correct key should be: "
+                            + config.iterationMetadataPrefix() + expression.getParts().get(0).getName();
                 }
                 incorrectExpressions.produce(new IncorrectExpressionBuildItem(expression.toOriginalString(),
                         "An invalid iteration metadata key is probably used\n\t- The configured iteration metadata prefix is "
@@ -2095,16 +2092,26 @@ public class QuteProcessor {
 
         if (!templateGlobals.isEmpty()) {
             Set<String> generatedGlobals = new HashSet<>();
-            // The initial priority is increased during live reload so that priorities of non-application globals
-            // do not conflict with priorities of application globals
-            int initialPriority = -1000 + existingValueResolvers.globals.size();
+            // The classes for non-application globals are only generated during the first run because they can't be reloaded
+            // by the class loader during hot reload
+            // However, we need to make sure the priorities used by non-application globals do not conflict
+            // with priorities of application globals that are regenerated during each hot reload
+            // Therefore, the initial priority is increased by the number of all globals ever found
+            // For example, if there are three globals [A, B, C] (A and C are non-application classes)
+            // The intial priority during the first hot reload will be "-1000 + 3 = 997"
+            // If a global D is added afterwards, the initial priority during the subsequent hot reload will be "-1000 + 4 = 996"
+            // If the global D is removed, the initial priority will still remain "-1000 + 4 = 996"
+            // This way we can be sure that the priorities assigned to A and C will never conflict with priorities of B and D or any other application global class
+            int initialPriority = -1000 + existingValueResolvers.allGlobals.size();
 
             TemplateGlobalGenerator globalGenerator = new TemplateGlobalGenerator(classOutput, GLOBAL_NAMESPACE,
                     initialPriority, index);
 
-            Map<DotName, Map<String, AnnotationTarget>> classToTargets = new HashMap<>();
+            Map<DotName, Map<String, AnnotationTarget>> classToTargets = new LinkedHashMap<>();
             Map<DotName, List<TemplateGlobalBuildItem>> classToGlobals = templateGlobals.stream()
-                    .collect(Collectors.groupingBy(TemplateGlobalBuildItem::getDeclaringClass));
+                    .sorted(Comparator.comparing(g -> g.getDeclaringClass()))
+                    .collect(Collectors.groupingBy(TemplateGlobalBuildItem::getDeclaringClass, LinkedHashMap::new,
+                            Collectors.toList()));
             for (Entry<DotName, List<TemplateGlobalBuildItem>> entry : classToGlobals.entrySet()) {
                 classToTargets.put(entry.getKey(), entry.getValue().stream().collect(
                         Collectors.toMap(TemplateGlobalBuildItem::getName, TemplateGlobalBuildItem::getTarget)));
@@ -2116,8 +2123,8 @@ public class QuteProcessor {
                     generatedGlobals.add(generatedClass);
                 } else {
                     generatedClass = globalGenerator.generate(index.getClassByName(e.getKey()), e.getValue());
-                    existingValueResolvers.addGlobal(e.getKey(), generatedClass, applicationClassPredicate);
                 }
+                existingValueResolvers.addGlobal(e.getKey(), generatedClass, applicationClassPredicate);
             }
             generatedGlobals.addAll(globalGenerator.getGeneratedTypes());
 
@@ -2135,8 +2142,11 @@ public class QuteProcessor {
     static class ExistingValueResolvers {
 
         final Map<String, String> identifiersToGeneratedClass = new HashMap<>();
-        // class declaring globals -> generated type
+
+        // class declaring globals -> generated type; non-application globals only
         final Map<String, String> globals = new HashMap<>();
+
+        final Set<String> allGlobals = new HashSet<>();
 
         boolean contains(MethodInfo extensionMethod) {
             return identifiersToGeneratedClass
@@ -2158,7 +2168,7 @@ public class QuteProcessor {
         }
 
         void addGlobal(DotName declaringClassName, String generatedClassName, Predicate<DotName> applicationClassPredicate) {
-            if (!applicationClassPredicate.test(declaringClassName)) {
+            if (allGlobals.add(generatedClassName.toString()) && !applicationClassPredicate.test(declaringClassName)) {
                 globals.put(declaringClassName.toString(), generatedClassName);
             }
         }
@@ -2171,6 +2181,7 @@ public class QuteProcessor {
     @BuildStep
     void collectTemplates(ApplicationArchivesBuildItem applicationArchives,
             CurateOutcomeBuildItem curateOutcome,
+            List<TemplatePathExcludeBuildItem> templatePathExcludes,
             BuildProducer<HotDeploymentWatchedFileBuildItem> watchedPaths,
             BuildProducer<TemplatePathBuildItem> templatePaths,
             BuildProducer<NativeImageResourceBuildItem> nativeImageResources,
@@ -2191,6 +2202,12 @@ public class QuteProcessor {
             }
         }).build());
 
+        List<Pattern> excludePatterns = new ArrayList<>(templatePathExcludes.size() + 1);
+        excludePatterns.add(config.templatePathExclude());
+        for (TemplatePathExcludeBuildItem exclude : templatePathExcludes) {
+            excludePatterns.add(Pattern.compile(exclude.getRegexPattern()));
+        }
+
         final Set<ApplicationArchive> allApplicationArchives = applicationArchives.getAllApplicationArchives();
         final Set<ArtifactKey> appArtifactKeys = new HashSet<>(allApplicationArchives.size());
         for (var archive : allApplicationArchives) {
@@ -2201,12 +2218,13 @@ public class QuteProcessor {
             // Skip extension archives that are also application archives
             if (!appArtifactKeys.contains(artifact.getKey())) {
                 scanPathTree(artifact.getContentTree(), templateRoots, watchedPaths, templatePaths, nativeImageResources,
-                        config);
+                        config, excludePatterns);
             }
         }
         for (ApplicationArchive archive : allApplicationArchives) {
             archive.accept(
-                    tree -> scanPathTree(tree, templateRoots, watchedPaths, templatePaths, nativeImageResources, config));
+                    tree -> scanPathTree(tree, templateRoots, watchedPaths, templatePaths, nativeImageResources, config,
+                            excludePatterns));
         }
     }
 
@@ -2214,7 +2232,7 @@ public class QuteProcessor {
             BuildProducer<HotDeploymentWatchedFileBuildItem> watchedPaths,
             BuildProducer<TemplatePathBuildItem> templatePaths,
             BuildProducer<NativeImageResourceBuildItem> nativeImageResources,
-            QuteConfig config) {
+            QuteConfig config, List<Pattern> excludePatterns) {
         for (String templateRoot : templateRoots) {
             if (PathTreeUtils.containsCaseSensitivePath(pathTree, templateRoot)) {
                 pathTree.walkIfContains(templateRoot, visit -> {
@@ -2227,9 +2245,11 @@ public class QuteProcessor {
                         // remove templateRoot + /
                         final String relativePath = visit.getRelativePath();
                         String templatePath = relativePath.substring(templateRoot.length() + 1);
-                        if (config.templatePathExclude.matcher(templatePath).matches()) {
-                            LOGGER.debugf("Template file excluded: %s", visit.getPath());
-                            return;
+                        for (Pattern p : excludePatterns) {
+                            if (p.matcher(templatePath).matches()) {
+                                LOGGER.debugf("Template file excluded: %s", visit.getPath());
+                                return;
+                            }
                         }
                         produceTemplateBuildItems(templatePaths, watchedPaths, nativeImageResources,
                                 relativePath, templatePath, visit.getPath(), config);
@@ -2247,7 +2267,7 @@ public class QuteProcessor {
             filePaths.add(path);
             // Also add version without suffix from the path
             // For example for "items.html" also add "items"
-            for (String suffix : config.suffixes) {
+            for (String suffix : config.suffixes()) {
                 if (path.endsWith(suffix)) {
                     filePaths.add(path.substring(0, path.length() - (suffix.length() + 1)));
                 }
@@ -2413,21 +2433,33 @@ public class QuteProcessor {
     }
 
     @BuildStep
-    TemplateVariantsBuildItem collectTemplateVariants(List<TemplatePathBuildItem> templatePaths) throws IOException {
+    TemplateVariantsBuildItem collectTemplateVariants(List<TemplatePathBuildItem> templatePaths, QuteConfig config)
+            throws IOException {
         Set<String> allPaths = templatePaths.stream().map(TemplatePathBuildItem::getPath).collect(Collectors.toSet());
+        // Variants are usually used when injecting a template, e.g. @Inject Template foo
+        // In this case, the suffix may not specified but the correct template may be selected based on a matching variant
+        // For example, the HTTP Accept header may be used to find a matching variant
         // item -> [item.html, item.txt]
-        // ItemResource/item -> -> [ItemResource/item.html, ItemResource/item.xml]
+        // item.1 -> [item.1.html, item.1.txt]
+        // item -> [item.qute.html, item.qute.txt]
+        // ItemResource/item -> [ItemResource/item.html, ItemResource/item.xml]
         Map<String, List<String>> baseToVariants = new HashMap<>();
         for (String path : allPaths) {
-            int idx = path.indexOf('.');
-            if (idx != -1) {
-                String base = path.substring(0, idx);
-                List<String> variants = baseToVariants.get(base);
-                if (variants == null) {
-                    variants = new ArrayList<>();
-                    baseToVariants.put(base, variants);
+            for (String suffix : config.suffixes()) {
+                // Iterate over all supported suffixes and register appropriate base
+                // item.1.html -> item.1
+                // item.html -> item
+                // item.qute.html -> item, item.qute
+                // ItemResource/item.xml -> ItemResource/item
+                if (path.endsWith(suffix)) {
+                    String base = path.substring(0, path.length() - (suffix.length() + 1));
+                    List<String> variants = baseToVariants.get(base);
+                    if (variants == null) {
+                        variants = new ArrayList<>();
+                        baseToVariants.put(base, variants);
+                    }
+                    variants.add(path);
                 }
-                variants.add(path);
             }
         }
         LOGGER.debugf("Template variants found: %s", baseToVariants);
@@ -2466,8 +2498,8 @@ public class QuteProcessor {
             }
         }, true));
 
-        if (config.typeCheckExcludes.isPresent()) {
-            for (String exclude : config.typeCheckExcludes.get()) {
+        if (config.typeCheckExcludes().isPresent()) {
+            for (String exclude : config.typeCheckExcludes().get()) {
                 //
                 String[] parts = exclude.split("\\.");
                 if (parts.length < 2) {
@@ -2542,7 +2574,7 @@ public class QuteProcessor {
     @Record(value = STATIC_INIT)
     void initialize(BuildProducer<SyntheticBeanBuildItem> syntheticBeans, QuteRecorder recorder,
             List<TemplatePathBuildItem> templatePaths, Optional<TemplateVariantsBuildItem> templateVariants,
-            TemplateRootsBuildItem templateRoots) {
+            TemplateRootsBuildItem templateRoots, List<TemplatePathExcludeBuildItem> templatePathExcludes) {
 
         List<String> templates = new ArrayList<>();
         List<String> tags = new ArrayList<>();
@@ -2566,11 +2598,17 @@ public class QuteProcessor {
             variants = Collections.emptyMap();
         }
 
+        List<String> excludePatterns = new ArrayList<>(templatePathExcludes.size());
+        for (TemplatePathExcludeBuildItem exclude : templatePathExcludes) {
+            excludePatterns.add(exclude.getRegexPattern());
+        }
+
         syntheticBeans.produce(SyntheticBeanBuildItem.configure(QuteContext.class)
                 .scope(BuiltinScope.SINGLETON.getInfo())
                 .supplier(recorder.createContext(templates,
                         tags, variants,
-                        templateRoots.getPaths().stream().map(p -> p + "/").collect(Collectors.toSet()), templateContents))
+                        templateRoots.getPaths().stream().map(p -> p + "/").collect(Collectors.toSet()), templateContents,
+                        excludePatterns))
                 .done());
     }
 
@@ -3503,8 +3541,7 @@ public class QuteProcessor {
     private static void produceTemplateBuildItems(BuildProducer<TemplatePathBuildItem> templatePaths,
             BuildProducer<HotDeploymentWatchedFileBuildItem> watchedPaths,
             BuildProducer<NativeImageResourceBuildItem> nativeImageResources, String resourcePath,
-            String templatePath,
-            Path originalPath, QuteConfig config) {
+            String templatePath, Path originalPath, QuteConfig config) {
         if (templatePath.isEmpty()) {
             return;
         }
@@ -3513,14 +3550,15 @@ public class QuteProcessor {
                 resourcePath,
                 originalPath);
         boolean restartNeeded = true;
-        if (config.devMode.noRestartTemplates.isPresent()) {
-            restartNeeded = !config.devMode.noRestartTemplates.get().matcher(resourcePath).matches();
+        if (config.devMode().noRestartTemplates().isPresent()) {
+            restartNeeded = !config.devMode().noRestartTemplates().get().matcher(resourcePath).matches();
         }
         watchedPaths.produce(new HotDeploymentWatchedFileBuildItem(resourcePath, restartNeeded));
         nativeImageResources.produce(new NativeImageResourceBuildItem(resourcePath));
-        templatePaths.produce(
-                new TemplatePathBuildItem(templatePath, originalPath,
-                        readTemplateContent(originalPath, config.defaultCharset)));
+        templatePaths.produce(TemplatePathBuildItem.builder()
+                .path(templatePath)
+                .fullPath(originalPath)
+                .content(readTemplateContent(originalPath, config.defaultCharset())).build());
     }
 
     private static boolean isExcluded(TypeCheck check, Iterable<Predicate<TypeCheck>> excludes) {

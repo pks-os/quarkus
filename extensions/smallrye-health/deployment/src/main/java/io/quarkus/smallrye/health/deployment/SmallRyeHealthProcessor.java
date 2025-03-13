@@ -288,12 +288,12 @@ class SmallRyeHealthProcessor {
     @BuildStep(onlyIf = OpenAPIIncluded.class)
     public void includeInOpenAPIEndpoint(BuildProducer<AddToOpenAPIDefinitionBuildItem> openAPIProducer,
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig,
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
             Capabilities capabilities,
             SmallRyeHealthBuildTimeConfig healthConfig) {
 
         // Add to OpenAPI if OpenAPI is available
-        if (capabilities.isPresent(Capability.SMALLRYE_OPENAPI) && !managementInterfaceBuildTimeConfig.enabled) {
+        if (capabilities.isPresent(Capability.SMALLRYE_OPENAPI) && !managementBuildTimeConfig.enabled()) {
             String healthRootPath = nonApplicationRootPathBuildItem.resolvePath(healthConfig.rootPath());
             HealthOpenAPIFilter filter = new HealthOpenAPIFilter(healthRootPath,
                     nonApplicationRootPathBuildItem.resolveManagementNestedPath(healthRootPath, healthConfig.livenessPath()),
@@ -329,13 +329,13 @@ class SmallRyeHealthProcessor {
     @BuildStep
     public void kubernetes(NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
             SmallRyeHealthBuildTimeConfig healthConfig,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig,
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
             BuildProducer<KubernetesHealthLivenessPathBuildItem> livenessPathItemProducer,
             BuildProducer<KubernetesHealthReadinessPathBuildItem> readinessPathItemProducer,
             BuildProducer<KubernetesHealthStartupPathBuildItem> startupPathItemProducer,
             BuildProducer<KubernetesProbePortNameBuildItem> port) {
 
-        if (managementInterfaceBuildTimeConfig.enabled) {
+        if (managementBuildTimeConfig.enabled()) {
             // Switch to the "management" port
             port.produce(new KubernetesProbePortNameBuildItem("management", selectSchemeForManagement()));
         }
@@ -374,7 +374,7 @@ class SmallRyeHealthProcessor {
     @BuildStep
     void registerUiExtension(
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig,
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
             SmallRyeHealthBuildTimeConfig healthConfig,
             LaunchModeBuildItem launchModeBuildItem,
             BuildProducer<WebJarBuildItem> webJarBuildProducer) {
@@ -388,7 +388,7 @@ class SmallRyeHealthProcessor {
             }
 
             String healthPath = nonApplicationRootPathBuildItem.resolveManagementPath(healthConfig.rootPath(),
-                    managementInterfaceBuildTimeConfig, launchModeBuildItem, false);
+                    managementBuildTimeConfig, launchModeBuildItem, false);
 
             webJarBuildProducer.produce(
                     WebJarBuildItem.builder().artifactKey(HEALTH_UI_WEBJAR_ARTIFACT_KEY) //

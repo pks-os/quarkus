@@ -89,6 +89,7 @@ public class RestClientBuilderImpl implements RestClientBuilder {
     private Boolean trustAll;
     private String userAgent;
     private Boolean disableDefaultMapper;
+    private Boolean enableCompression;
 
     @Override
     public RestClientBuilderImpl baseUrl(URL url) {
@@ -263,6 +264,11 @@ public class RestClientBuilderImpl implements RestClientBuilder {
 
     public RestClientBuilderImpl disableDefaultMapper(Boolean disableDefaultMapper) {
         this.disableDefaultMapper = disableDefaultMapper;
+        return this;
+    }
+
+    public RestClientBuilderImpl enableCompression(boolean enableCompression) {
+        this.enableCompression = enableCompression;
         return this;
     }
 
@@ -516,7 +522,7 @@ public class RestClientBuilderImpl implements RestClientBuilder {
         } else if (restClients.maxChunkSize().isPresent()) {
             clientBuilder.maxChunkSize((int) restClients.maxChunkSize().get().asLongValue());
         } else if (restClients.multipart().maxChunkSize().isPresent()) {
-            clientBuilder.maxChunkSize(restClients.multipart().maxChunkSize().get());
+            clientBuilder.maxChunkSize(restClients.multipart().maxChunkSize().getAsInt());
         } else {
             clientBuilder.maxChunkSize(DEFAULT_MAX_CHUNK_SIZE);
         }
@@ -533,10 +539,20 @@ public class RestClientBuilderImpl implements RestClientBuilder {
             clientBuilder.alpn(restClients.alpn().get());
         }
 
-        Boolean enableCompression = ConfigProvider.getConfig()
-                .getOptionalValue(ENABLE_COMPRESSION, Boolean.class).orElse(false);
-        if (enableCompression) {
-            clientBuilder.enableCompression();
+        Boolean effectiveEnableCompression = enableCompression;
+        if (effectiveEnableCompression == null) {
+            if (restClients.enableCompression().isPresent()) {
+                effectiveEnableCompression = restClients.enableCompression().get();
+            }
+        }
+        if (effectiveEnableCompression == null) {
+            var maybeGlobalEnableCompression = ConfigProvider.getConfig().getOptionalValue(ENABLE_COMPRESSION, Boolean.class);
+            if (maybeGlobalEnableCompression.isPresent()) {
+                effectiveEnableCompression = maybeGlobalEnableCompression.get();
+            }
+        }
+        if (effectiveEnableCompression != null) {
+            clientBuilder.enableCompression(effectiveEnableCompression);
         }
 
         if (proxyHost != null) {

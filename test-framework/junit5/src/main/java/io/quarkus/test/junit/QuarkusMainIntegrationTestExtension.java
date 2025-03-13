@@ -1,8 +1,12 @@
 package io.quarkus.test.junit;
 
+import static io.quarkus.test.junit.ArtifactTypeUtil.isContainer;
+import static io.quarkus.test.junit.ArtifactTypeUtil.isJar;
 import static io.quarkus.test.junit.IntegrationTestUtil.activateLogging;
 import static io.quarkus.test.junit.IntegrationTestUtil.determineBuildOutputDirectory;
 import static io.quarkus.test.junit.IntegrationTestUtil.determineTestProfileAndProperties;
+import static io.quarkus.test.junit.IntegrationTestUtil.ensureNoInjectAnnotationIsUsed;
+import static io.quarkus.test.junit.IntegrationTestUtil.getEffectiveArtifactType;
 import static io.quarkus.test.junit.IntegrationTestUtil.getSysPropsToRestore;
 import static io.quarkus.test.junit.IntegrationTestUtil.handleDevServices;
 import static io.quarkus.test.junit.IntegrationTestUtil.readQuarkusArtifactProperties;
@@ -94,14 +98,19 @@ public class QuarkusMainIntegrationTestExtension extends AbstractQuarkusTestWith
     }
 
     private void prepare(ExtensionContext extensionContext) throws Exception {
-        quarkusArtifactProperties = readQuarkusArtifactProperties(extensionContext);
-        String artifactType = quarkusArtifactProperties.getProperty("type");
-        if (artifactType == null) {
-            throw new IllegalStateException("Unable to determine the type of artifact created by the Quarkus build");
-        }
-        boolean isDockerLaunch = "jar-container".equals(artifactType) || "native-container".equals(artifactType);
+        Class<?> testClass = extensionContext.getRequiredTestClass();
+        ensureNoInjectAnnotationIsUsed(testClass, "@QuarkusMainIntegrationTest");
 
-        ArtifactLauncher.InitContext.DevServicesLaunchResult devServicesLaunchResult = handleDevServices(extensionContext,
+        quarkusArtifactProperties = readQuarkusArtifactProperties(extensionContext);
+        SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+        String artifactType = getEffectiveArtifactType(quarkusArtifactProperties, config);
+
+        TestConfig testConfig = config.getConfigMapping(TestConfig.class);
+
+        boolean isDockerLaunch = isContainer(artifactType)
+                || (isJar(artifactType) && "test-with-native-agent".equals(testConfig.integrationTestProfile()));
+
+        devServicesLaunchResult = handleDevServices(extensionContext,
                 isDockerLaunch);
         devServicesProps = devServicesLaunchResult.properties();
 
@@ -154,6 +163,8 @@ public class QuarkusMainIntegrationTestExtension extends AbstractQuarkusTestWith
                     }
                 }
                 additionalProperties.putAll(resourceManagerProps);
+                // recalculate the property names that may have changed with testProfileAndProperties.properties
+                ConfigProvider.getConfig().unwrap(SmallRyeConfig.class).getLatestPropertyNames();
 
                 testResourceManager.inject(context.getRequiredTestInstance());
 
@@ -180,15 +191,15 @@ public class QuarkusMainIntegrationTestExtension extends AbstractQuarkusTestWith
                 return launcher.runToCompletion(args);
 
             } finally {
-
                 for (Map.Entry<String, String> i : old.entrySet()) {
-                    old.put(i.getKey(), System.getProperty(i.getKey()));
                     if (i.getValue() == null) {
                         System.clearProperty(i.getKey());
                     } else {
                         System.setProperty(i.getKey(), i.getValue());
                     }
                 }
+                // recalculate the property names that may have changed with the restore
+                ConfigProvider.getConfig().unwrap(SmallRyeConfig.class).getLatestPropertyNames();
                 try {
                     if (testResourceManager != null) {
                         testResourceManager.close();

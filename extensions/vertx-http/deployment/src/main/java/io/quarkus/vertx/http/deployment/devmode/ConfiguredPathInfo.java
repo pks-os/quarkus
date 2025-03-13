@@ -31,12 +31,13 @@ public class ConfiguredPathInfo {
         }
     }
 
-    public String getEndpointPath(NonApplicationRootPathBuildItem nonAppRoot, ManagementInterfaceBuildTimeConfig mibt,
+    public String getEndpointPath(NonApplicationRootPathBuildItem nonAppRoot,
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
             LaunchModeBuildItem mode) {
         if (absolutePath) {
             return endpointPath;
         }
-        if (management && mibt.enabled) {
+        if (management && managementBuildTimeConfig.enabled()) {
             var prefix = NonApplicationRootPathBuildItem.getManagementUrlPrefix(mode);
             return prefix + endpointPath;
         } else {

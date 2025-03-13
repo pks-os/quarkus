@@ -257,7 +257,7 @@ public class SmallRyeOpenApiProcessor {
             ShutdownContextBuildItem shutdownContext,
             SmallRyeOpenApiConfig openApiConfig,
             List<FilterBuildItem> filterBuildItems,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig) {
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig) {
         /*
          * <em>Ugly Hack</em>
          * In dev mode, we pass a classloader to load the up to date OpenAPI document.
@@ -314,19 +314,19 @@ public class SmallRyeOpenApiProcessor {
                         .build());
 
         // If management is enabled and swagger-ui is part of management, we need to add CORS so that swagger can hit the endpoint
-        if (isManagement(managementInterfaceBuildTimeConfig, openApiConfig, launch)) {
+        if (isManagement(managementBuildTimeConfig, openApiConfig, launch)) {
             Config c = ConfigProvider.getConfig();
 
-            // quarkus.http.cors=true
+            // quarkus.http.cors.enabled=true
             // quarkus.http.cors.origins
-            Optional<Boolean> maybeCors = c.getOptionalValue("quarkus.http.cors", Boolean.class);
+            Optional<Boolean> maybeCors = c.getOptionalValue("quarkus.http.cors.enabled", Boolean.class);
             if (!maybeCors.isPresent() || !maybeCors.get().booleanValue()) {
-                // We need to set quarkus.http.cors=true
-                systemProperties.produce(new SystemPropertyBuildItem("quarkus.http.cors", "true"));
+                // We need to set quarkus.http.cors.enabled=true
+                systemProperties.produce(new SystemPropertyBuildItem("quarkus.http.cors.enabled", "true"));
             }
 
             String managementUrl = getManagementRoot(launch, nonApplicationRootPathBuildItem, openApiConfig,
-                    managementInterfaceBuildTimeConfig);
+                    managementBuildTimeConfig);
 
             List<String> origins = c.getOptionalValues("quarkus.http.cors.origins", String.class).orElse(new ArrayList<>());
             if (!origins.contains(managementUrl)) {
@@ -342,11 +342,11 @@ public class SmallRyeOpenApiProcessor {
     private String getManagementRoot(LaunchModeBuildItem launch,
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
             SmallRyeOpenApiConfig openApiConfig,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig) {
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig) {
         String managementRoot = nonApplicationRootPathBuildItem.resolveManagementPath("/",
-                managementInterfaceBuildTimeConfig, launch, openApiConfig.managementEnabled());
+                managementBuildTimeConfig, launch, openApiConfig.managementEnabled());
 
-        return managementRoot.split(managementInterfaceBuildTimeConfig.rootPath)[0];
+        return managementRoot.split(managementBuildTimeConfig.rootPath())[0];
 
     }
 
@@ -392,7 +392,7 @@ public class SmallRyeOpenApiProcessor {
             OpenApiFilteredIndexViewBuildItem apiFilteredIndexViewBuildItem,
             SmallRyeOpenApiConfig config,
             LaunchModeBuildItem launchModeBuildItem,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig) {
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig) {
 
         // Add a security scheme from config
         if (config.securityScheme().isPresent()) {
@@ -416,7 +416,7 @@ public class SmallRyeOpenApiProcessor {
         OASFilter autoServerFilter = getAutoServerFilter(config, false, "Auto generated value");
         if (autoServerFilter != null) {
             addToOpenAPIDefinitionProducer.produce(new AddToOpenAPIDefinitionBuildItem(autoServerFilter));
-        } else if (isManagement(managementInterfaceBuildTimeConfig, config, launchModeBuildItem)) { // Add server if management is enabled
+        } else if (isManagement(managementBuildTimeConfig, config, launchModeBuildItem)) { // Add server if management is enabled
             OASFilter serverFilter = getAutoServerFilter(config, true, "Auto-added by management interface");
             if (serverFilter != null) {
                 addToOpenAPIDefinitionProducer.produce(new AddToOpenAPIDefinitionBuildItem(serverFilter));
@@ -443,7 +443,7 @@ public class SmallRyeOpenApiProcessor {
         return index
                 .getAnnotations(OpenApiFilter.class)
                 .stream()
-                .filter(ai -> stages.contains(OpenApiFilter.RunStage.valueOf(ai.value().asEnum())))
+                .filter(ai -> stages.contains(OpenApiFilter.RunStage.valueOf(ai.valueWithDefault(index).asEnum())))
                 .sorted(comparator)
                 .map(ai -> ai.target().asClass())
                 .filter(c -> c.interfaceNames().contains(DotName.createSimple(OASFilter.class.getName())))
@@ -451,10 +451,10 @@ public class SmallRyeOpenApiProcessor {
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 
-    private boolean isManagement(ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig,
+    private boolean isManagement(ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
             SmallRyeOpenApiConfig smallRyeOpenApiConfig,
             LaunchModeBuildItem launchModeBuildItem) {
-        return managementInterfaceBuildTimeConfig.enabled && smallRyeOpenApiConfig.managementEnabled()
+        return managementBuildTimeConfig.enabled() && smallRyeOpenApiConfig.managementEnabled()
                 && launchModeBuildItem.getLaunchMode().equals(LaunchMode.DEVELOPMENT);
     }
 
@@ -561,7 +561,8 @@ public class SmallRyeOpenApiProcessor {
         if (!classNamesMethods.isEmpty() || !rolesAllowedMethods.isEmpty() || !authenticatedMethods.isEmpty()) {
             return new OperationFilter(classNamesMethods, rolesAllowedMethods, authenticatedMethods,
                     config.securitySchemeName(),
-                    config.autoAddTags(), config.autoAddOperationSummary(), isOpenApi_3_1_0_OrGreater(config));
+                    config.autoAddTags(), config.autoAddOperationSummary(), config.autoAddBadRequestResponse(),
+                    isOpenApi_3_1_0_OrGreater(config));
         }
 
         return null;

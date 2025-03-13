@@ -62,10 +62,10 @@ public class OidcProvider implements Closeable {
             SignatureAlgorithm.PS384.getAlgorithm(),
             SignatureAlgorithm.PS512.getAlgorithm(),
             SignatureAlgorithm.EDDSA.getAlgorithm() };
-    private static final AlgorithmConstraints ASYMMETRIC_ALGORITHM_CONSTRAINTS = new AlgorithmConstraints(
-            AlgorithmConstraints.ConstraintType.PERMIT, ASYMMETRIC_SUPPORTED_ALGORITHMS);
     private static final AlgorithmConstraints SYMMETRIC_ALGORITHM_CONSTRAINTS = new AlgorithmConstraints(
             AlgorithmConstraints.ConstraintType.PERMIT, SignatureAlgorithm.HS256.getAlgorithm());
+    static final AlgorithmConstraints ASYMMETRIC_ALGORITHM_CONSTRAINTS = new AlgorithmConstraints(
+            AlgorithmConstraints.ConstraintType.PERMIT, ASYMMETRIC_SUPPORTED_ALGORITHMS);
     static final String ANY_ISSUER = "any";
 
     private final List<Validator> customValidators;
@@ -661,7 +661,7 @@ public class OidcProvider implements Closeable {
                 var claimValue = claims.getStringClaimValue(claimName);
                 var targetValue = targetClaim.getValue();
                 if (!claimValue.equals(targetValue)) {
-                    return "claim " + claimName + "does not match expected value of " + targetValue;
+                    return "claim " + claimName + " does not match expected value of " + targetValue;
                 }
             }
             return null;

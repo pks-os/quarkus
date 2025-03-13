@@ -1,9 +1,11 @@
 package io.quarkus.restclient.config;
 
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Supplier;
 
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -143,14 +145,15 @@ public interface RestClientsConfig {
      * <p>
      * Can be overwritten by client-specific settings.
      */
-    Optional<Integer> connectionTTL();
+    OptionalInt connectionTTL();
 
     /**
      * The size of the connection pool for this client.
      * <p>
      * Can be overwritten by client-specific settings.
      */
-    Optional<Integer> connectionPoolSize();
+    @ConfigDocDefault("50")
+    OptionalInt connectionPoolSize();
 
     /**
      * If set to false disables the keep alive completely.
@@ -167,7 +170,7 @@ public interface RestClientsConfig {
      * <p>
      * This property is not applicable to the RESTEasy Client.
      */
-    Optional<Integer> maxRedirects();
+    OptionalInt maxRedirects();
 
     /**
      * A boolean value used to determine whether the client should follow HTTP redirect responses.
@@ -274,12 +277,29 @@ public interface RestClientsConfig {
     boolean http2();
 
     /**
-     * The max HTTP chunk size (8096 bytes by default).
+     * Configures two different things:
+     * <ul>
+     * <li>The max HTTP chunk size</li>
+     * <li>The size of the chunk to be read when an {@link InputStream} is being used as an input</li>
+     * </ul>
      * <p>
      * Can be overwritten by client-specific settings.
+     * <p>
+     * This property is not applicable to the RESTEasy Client.
      */
     @ConfigDocDefault("8k")
     Optional<MemorySize> maxChunkSize();
+
+    /**
+     * Supports receiving compressed messages using GZIP.
+     * When this feature is enabled and a server returns a response that includes the header {@code Content-Encoding: gzip},
+     * REST Client will automatically decode the content and proceed with the message handling.
+     * <p>
+     * This property is not applicable to the RESTEasy Client.
+     * <p>
+     * Can be overwritten by client-specific settings.
+     */
+    Optional<Boolean> enableCompression();
 
     /**
      * If the Application-Layer Protocol Negotiation is enabled, the client will negotiate which protocol to use over the
@@ -351,7 +371,7 @@ public interface RestClientsConfig {
          * @deprecated Use {@code quarkus.rest-client.max-chunk-size} instead
          */
         @Deprecated
-        Optional<Integer> maxChunkSize();
+        OptionalInt maxChunkSize();
     }
 
     interface RestClientConfig {
@@ -537,12 +557,13 @@ public interface RestClientsConfig {
          * The time in ms for which a connection remains unused in the connection pool before being evicted and closed.
          * A timeout of {@code 0} means there is no timeout.
          */
-        Optional<Integer> connectionTTL();
+        OptionalInt connectionTTL();
 
         /**
          * The size of the connection pool for this client.
          */
-        Optional<Integer> connectionPoolSize();
+        @ConfigDocDefault("50")
+        OptionalInt connectionPoolSize();
 
         /**
          * If set to false disables the keep alive completely.
@@ -554,7 +575,7 @@ public interface RestClientsConfig {
          * <p>
          * This property is not applicable to the RESTEasy Client.
          */
-        Optional<Integer> maxRedirects();
+        OptionalInt maxRedirects();
 
         /**
          * The HTTP headers that should be applied to all requests of the rest client.
@@ -593,12 +614,25 @@ public interface RestClientsConfig {
         Optional<Boolean> http2();
 
         /**
-         * The max HTTP chunk size (8096 bytes by default).
+         * Configures two different things:
+         * <ul>
+         * <li>The max HTTP chunk size</li>
+         * <li>The size of the chunk to be read when an {@link InputStream} is being read and sent to the server</li>
+         * </ul>
          * <p>
          * This property is not applicable to the RESTEasy Client.
          */
         @ConfigDocDefault("8K")
         Optional<MemorySize> maxChunkSize();
+
+        /**
+         * Supports receiving compressed messages using GZIP.
+         * When this feature is enabled and a server returns a response that includes the header {@code Content-Encoding: gzip},
+         * REST Client will automatically decode the content and proceed with the message handling.
+         * <p>
+         * This property is not applicable to the RESTEasy Client.
+         */
+        Optional<Boolean> enableCompression();
 
         /**
          * If the Application-Layer Protocol Negotiation is enabled, the client will negotiate which protocol to use over the

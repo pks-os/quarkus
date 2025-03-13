@@ -163,6 +163,7 @@ import io.quarkus.netty.deployment.MinNettyAllocatorMaxOrderBuildItem;
 import io.quarkus.resteasy.reactive.common.deployment.AggregatedParameterContainersBuildItem;
 import io.quarkus.resteasy.reactive.common.deployment.ApplicationResultBuildItem;
 import io.quarkus.resteasy.reactive.common.deployment.FactoryUtils;
+import io.quarkus.resteasy.reactive.common.deployment.JaxRsSecurityConfig;
 import io.quarkus.resteasy.reactive.common.deployment.ParameterContainersBuildItem;
 import io.quarkus.resteasy.reactive.common.deployment.QuarkusFactoryCreator;
 import io.quarkus.resteasy.reactive.common.deployment.QuarkusResteasyReactiveDotNames;
@@ -170,7 +171,6 @@ import io.quarkus.resteasy.reactive.common.deployment.ResourceInterceptorsBuildI
 import io.quarkus.resteasy.reactive.common.deployment.ResourceScanningResultBuildItem;
 import io.quarkus.resteasy.reactive.common.deployment.SerializersUtil;
 import io.quarkus.resteasy.reactive.common.deployment.ServerDefaultProducesHandlerBuildItem;
-import io.quarkus.resteasy.reactive.common.runtime.JaxRsSecurityConfig;
 import io.quarkus.resteasy.reactive.common.runtime.ResteasyReactiveConfig;
 import io.quarkus.resteasy.reactive.server.EndpointDisabled;
 import io.quarkus.resteasy.reactive.server.runtime.QuarkusServerFileBodyHandler;
@@ -222,8 +222,8 @@ import io.quarkus.vertx.http.deployment.EagerSecurityInterceptorMethodsBuildItem
 import io.quarkus.vertx.http.deployment.FilterBuildItem;
 import io.quarkus.vertx.http.deployment.HttpSecurityUtils;
 import io.quarkus.vertx.http.deployment.RouteBuildItem;
-import io.quarkus.vertx.http.runtime.HttpBuildTimeConfig;
 import io.quarkus.vertx.http.runtime.RouteConstants;
+import io.quarkus.vertx.http.runtime.VertxHttpBuildTimeConfig;
 import io.quarkus.vertx.http.runtime.security.JaxRsPathMatchingHttpSecurityPolicy;
 import io.vertx.core.Handler;
 import io.vertx.core.http.HttpServerRequest;
@@ -521,6 +521,9 @@ public class ResteasyReactiveProcessor {
                 return false;
             };
 
+            final boolean filtersAccessResourceMethod = filtersAccessResourceMethod(
+                    resourceInterceptorsBuildItem.getResourceInterceptors());
+
             BiConsumer<String, BiFunction<String, ClassVisitor, ClassVisitor>> transformationConsumer = (name,
                     function) -> bytecodeTransformerBuildItemBuildProducer
                             .produce(new BytecodeTransformerBuildItem(name, function));
@@ -612,12 +615,12 @@ public class ResteasyReactiveProcessor {
                                 }
                             }
 
-                            if (paramsRequireReflection ||
+                            if (filtersAccessResourceMethod ||
+                                    paramsRequireReflection ||
                                     MULTI.toString().equals(entry.getResourceMethod().getSimpleReturnType()) ||
                                     REST_MULTI.toString().equals(entry.getResourceMethod().getSimpleReturnType()) ||
                                     PUBLISHER.toString().equals(entry.getResourceMethod().getSimpleReturnType()) ||
                                     LEGACY_PUBLISHER.toString().equals(entry.getResourceMethod().getSimpleReturnType()) ||
-                                    filtersAccessResourceMethod(resourceInterceptorsBuildItem.getResourceInterceptors()) ||
                                     entry.additionalRegisterClassForReflectionCheck()) {
                                 minimallyRegisterResourceClassForReflection(entry, reflectiveClassBuildItemBuildProducer);
                             }
@@ -682,7 +685,8 @@ public class ResteasyReactiveProcessor {
                             boolean disableIfMissing = disableIfMissingValue != null && disableIfMissingValue.asBoolean();
                             return recorder.disableIfPropertyMatches(propertyName, propertyValue, disableIfMissing);
                         }
-                    });
+                    })
+                    .alreadyHandledRequestScopedResources(result.getRequestScopedResources());
 
             serverEndpointIndexerBuilder.skipNotRestParameters(allowNotRestParametersBuildItem.isPresent());
 
@@ -726,14 +730,31 @@ public class ResteasyReactiveProcessor {
 
             checkForDuplicateEndpoint(config, allServerMethods);
 
+            Function<Type, DotName> typeToReturnName = new Function<Type, DotName>() {
+                @Override
+                public DotName apply(Type type) {
+                    DotName typeName = type.name();
+                    if (type.kind() == Type.Kind.CLASS) {
+                        return typeName;
+                    } else if (type.kind() == Type.Kind.PARAMETERIZED_TYPE
+                            && DotNames.CLASS_NAME.equals(typeName)) {
+                        // spec allows for Class<SubResource> to be returned that the container should instantiate
+                        return type.asParameterizedType().arguments().get(0).name();
+                    }
+                    return null;
+                }
+            };
+
+            Map<DotName, Set<DotName>> returnsBySubResources = new HashMap<>();
             //now index possible sub resources. These are all classes that have method annotations
             //that are not annotated @Path
-            Deque<ClassInfo> toScan = new ArrayDeque<>();
             for (DotName methodAnnotation : result.getHttpAnnotationToMethod().keySet()) {
                 for (AnnotationInstance instance : index.getAnnotations(methodAnnotation)) {
                     MethodInfo method = instance.target().asMethod();
                     ClassInfo classInfo = method.declaringClass();
-                    toScan.add(classInfo);
+
+                    returnsBySubResources.computeIfAbsent(classInfo.name(), ignored -> new HashSet<>())
+                            .add(typeToReturnName.apply(method.returnType()));
                 }
             }
             //sub resources can also have just a path annotation
@@ -742,46 +763,112 @@ public class ResteasyReactiveProcessor {
                 if (instance.target().kind() == AnnotationTarget.Kind.METHOD) {
                     MethodInfo method = instance.target().asMethod();
                     ClassInfo classInfo = method.declaringClass();
-                    toScan.add(classInfo);
+
+                    returnsBySubResources.computeIfAbsent(classInfo.name(), ignored -> new HashSet<>())
+                            .add(typeToReturnName.apply(method.returnType()));
                 }
             }
-            Map<DotName, ClassInfo> possibleSubResources = new HashMap<>();
-            Set<String> resourceClassNames = null;
-            while (!toScan.isEmpty()) {
-                ClassInfo classInfo = toScan.poll();
-                if (scannedResources.containsKey(classInfo.name()) ||
-                        pathInterfaces.containsKey(classInfo.name()) ||
-                        possibleSubResources.containsKey(classInfo.name())) {
+
+            // build up index of sub resources and their child classes
+            // to later make it easier to figure out, if a given class a child of any possible sub resource.
+            Map<DotName, Set<DotName>> subClassesBySubResources = new HashMap<>();
+            for (DotName dotName : returnsBySubResources.keySet()) {
+                Set<DotName> all = new HashSet<>();
+                all.add(dotName);
+                index.getAllKnownSubclasses(dotName).forEach(c2 -> all.add(c2.name()));
+                index.getAllKnownSubinterfaces(dotName).forEach(c2 -> all.add(c2.name()));
+                index.getAllKnownImplementors(dotName).forEach(c2 -> all.add(c2.name()));
+
+                subClassesBySubResources.put(dotName, all);
+            }
+
+            // Iterate starting from the root resource classes
+            Set<DotName> resourceClassNames = new HashSet<>();
+            for (ResourceClass resourceClass : resourceClasses) {
+                resourceClassNames.add(DotName.createSimple(resourceClass.getClassName()));
+            }
+            Deque<DotName> workQueue = new ArrayDeque<>(resourceClassNames);
+
+            Map<DotName, Set<DotName>> childs = new HashMap<>();
+            Set<DotName> seen = new HashSet<>();
+            // Set of classes that where determined to maybe be reachable and have to be indexed
+            List<ClassInfo> toScan = new ArrayList<>();
+            while (!workQueue.isEmpty()) {
+                DotName poll = workQueue.poll();
+                if (!seen.add(poll)) {
                     continue;
                 }
-                possibleSubResources.put(classInfo.name(), classInfo);
 
-                if (classInfo.isInterface()) {
-                    int resourceClassImplCount = 0;
-                    if (resourceClassNames == null) {
-                        resourceClassNames = resourceClasses.stream().map(ResourceClass::getClassName)
-                                .collect(Collectors.toSet());
+                Set<DotName> foundParentSubResources = new HashSet<>();
+                if (resourceClassNames.contains(poll)) {
+                    foundParentSubResources.add(poll);
+                }
+                subClassesBySubResources.forEach((subResource, childClasses) -> {
+                    if (childClasses.contains(poll)) {
+                        foundParentSubResources.add(subResource);
                     }
-                    for (ClassInfo impl : index.getAllKnownImplementors(classInfo.name())) {
-                        if (resourceClassNames.contains(impl.name().toString())) {
-                            resourceClassImplCount++;
+                });
+
+                if (!foundParentSubResources.isEmpty()) {
+                    toScan.add(index.getClassByName(poll));
+                }
+
+                if (!foundParentSubResources.contains(poll)) {
+                    // might be an extending interface, which itself is not a subresource locator
+                    // It will get indexed, but it does not contain any further links to other subresources
+                    continue;
+                }
+
+                Set<DotName> methodReturnTypes = new HashSet<>();
+                for (DotName dotName : foundParentSubResources) {
+                    if (returnsBySubResources.containsKey(dotName)) {
+                        methodReturnTypes.addAll(returnsBySubResources.get(dotName));
+                    }
+                }
+
+                for (DotName methodReturnType : methodReturnTypes) {
+                    Set<DotName> decls = childs.computeIfAbsent(methodReturnType, dotName -> {
+                        if (dotName == null) {
+                            return Collections.emptySet();
                         }
-                    }
-                    if (resourceClassImplCount > 1) {
-                        // this is the case were an interface doesn't denote a subresource, but it's simply used
-                        // to share method and annotations between Resource classes
-                        continue;
-                    }
+
+                        Set<DotName> all = new HashSet<>();
+                        if (DotNames.OBJECT_NAME.equals(dotName)) {
+                            all.addAll(returnsBySubResources.keySet());
+                            for (DotName name : returnsBySubResources.keySet()) {
+                                //we need to also look for all subclasses and interfaces
+                                //they may have type variables that need to be handled
+                                index.getAllKnownSubclasses(name).forEach(c2 -> all.add(c2.name()));
+                                index.getAllKnownSubinterfaces(name).forEach(c2 -> all.add(c2.name()));
+                                index.getAllKnownImplementors(name).forEach(c2 -> all.add(c2.name()));
+                            }
+                        } else {
+                            // index the returntype, might already be a sub resource locator
+                            all.add(dotName);
+
+                            //we need to also look for all subclasses and interfaces
+                            //they may have type variables that need to be handled
+                            index.getAllKnownSubclasses(dotName).forEach(c2 -> all.add(c2.name()));
+                            index.getAllKnownSubinterfaces(dotName).forEach(c2 -> all.add(c2.name()));
+                            index.getAllKnownImplementors(dotName).forEach(c2 -> all.add(c2.name()));
+                        }
+
+                        return all;
+                    });
+                    workQueue.addAll(decls);
+                }
+            }
+
+            for (ClassInfo classInfo : toScan) {
+                if (scannedResources.containsKey(classInfo.name()) ||
+                        pathInterfaces.containsKey(classInfo.name())) {
+                    continue;
                 }
 
                 Optional<ResourceClass> endpoints = serverEndpointIndexer.createEndpoints(classInfo, false);
                 if (endpoints.isPresent()) {
                     subResourceClasses.add(endpoints.get());
                 }
-                //we need to also look for all subclasses and interfaces
-                //they may have type variables that need to be handled
-                toScan.addAll(index.getKnownDirectImplementors(classInfo.name()));
-                toScan.addAll(index.getKnownDirectSubclasses(classInfo.name()));
             }
 
             setupEndpointsResultProducer.produce(new SetupEndpointsResultBuildItem(resourceClasses, subResourceClasses,
@@ -1255,7 +1342,7 @@ public class ResteasyReactiveProcessor {
             ResteasyReactiveRecorder recorder,
             RecorderContext recorderContext,
             ShutdownContextBuildItem shutdownContext,
-            HttpBuildTimeConfig vertxConfig,
+            VertxHttpBuildTimeConfig httpBuildTimeConfig,
             SetupEndpointsResultBuildItem setupEndpointsResult,
             ServerSerialisersBuildItem serverSerialisersBuildItem,
             List<PreExceptionMapperHandlerBuildItem> preExceptionMapperHandlerBuildItems,
@@ -1395,7 +1482,7 @@ public class ResteasyReactiveProcessor {
         }
 
         RuntimeValue<Deployment> deployment = recorder.createDeployment(deploymentPath, deploymentInfo,
-                beanContainerBuildItem.getValue(), shutdownContext, vertxConfig,
+                beanContainerBuildItem.getValue(), shutdownContext, httpBuildTimeConfig,
                 requestContextFactoryBuildItem.map(RequestContextFactoryBuildItem::getFactory).orElse(null),
                 initClassFactory, launchModeBuildItem.getLaunchMode(), servletPresent);
 
@@ -1409,7 +1496,7 @@ public class ResteasyReactiveProcessor {
             final boolean noCustomAuthCompletionExMapper;
             final boolean noCustomAuthFailureExMapper;
             final boolean noCustomAuthRedirectExMapper;
-            if (vertxConfig.auth.proactive) {
+            if (httpBuildTimeConfig.auth().proactive()) {
                 noCustomAuthCompletionExMapper = notFoundCustomExMapper(AuthenticationCompletionException.class.getName(),
                         AuthenticationCompletionExceptionMapper.class.getName(), exceptionMapping);
                 noCustomAuthFailureExMapper = notFoundCustomExMapper(AuthenticationFailedException.class.getName(),
@@ -1424,7 +1511,7 @@ public class ResteasyReactiveProcessor {
             }
 
             Handler<RoutingContext> failureHandler = recorder.failureHandler(restInitialHandler, noCustomAuthCompletionExMapper,
-                    noCustomAuthFailureExMapper, noCustomAuthRedirectExMapper, vertxConfig.auth.proactive);
+                    noCustomAuthFailureExMapper, noCustomAuthRedirectExMapper, httpBuildTimeConfig.auth().proactive());
 
             // we add failure handler right before QuarkusErrorHandler
             // so that user can define failure handlers that precede exception mappers

@@ -103,6 +103,7 @@ public abstract class QuarkusDev extends QuarkusTask {
     private final Property<Boolean> openJavaLang;
     private final ListProperty<String> modules;
     private final ListProperty<String> compilerArgs;
+    private final ListProperty<String> tests;
 
     private final Set<File> filesIncludedInClasspath = new HashSet<>();
 
@@ -139,6 +140,7 @@ public abstract class QuarkusDev extends QuarkusTask {
         openJavaLang = objectFactory.property(Boolean.class);
         openJavaLang.convention(false);
         modules = objectFactory.listProperty(String.class);
+        tests = objectFactory.listProperty(String.class);
     }
 
     /**
@@ -311,6 +313,17 @@ public abstract class QuarkusDev extends QuarkusTask {
         return this;
     }
 
+    @Input
+    public ListProperty<String> getTests() {
+        return tests;
+    }
+
+    @SuppressWarnings("unused")
+    @Option(description = "Sets test class or method name to be included (for continuous testing), '*' is supported.", option = "tests")
+    public void setTests(List<String> tests) {
+        getTests().set(tests);
+    }
+
     @TaskAction
     public void startDev() {
         if (!sourcesExist()) {
@@ -419,6 +432,10 @@ public abstract class QuarkusDev extends QuarkusTask {
             builder.jvmArgs("-Dquarkus.console.basic=true")
                     .jvmArgs("-Dio.quarkus.force-color-support=true");
         }
+        if (!getTests().get().isEmpty()) {
+            builder.jvmArgs("-Dquarkus-internal.test.specific-selection=gradle:"
+                    + String.join(",", getTests().get()));
+        }
 
         if (getJvmArguments().isPresent() && !getJvmArguments().get().isEmpty()) {
             builder.jvmArgs(getJvmArgs());
@@ -431,7 +448,6 @@ public abstract class QuarkusDev extends QuarkusTask {
         if (getModules().isPresent() && !getModules().get().isEmpty()) {
             builder.addModules(getModules().get());
         }
-
         for (Map.Entry<String, ?> e : project.getProperties().entrySet()) {
             if (e.getValue() instanceof String) {
                 builder.buildSystemProperty(e.getKey(), e.getValue().toString());
@@ -448,11 +464,14 @@ public abstract class QuarkusDev extends QuarkusTask {
         builder.extensionDevModeConfig(appModel.getExtensionDevModeConfig())
                 .extensionDevModeJvmOptionFilter(extensionJvmOptions);
 
+        builder.jvmArgs("-Dgradle.project.path="
+                + getProject().getLayout().getProjectDirectory().getAsFile().getAbsolutePath());
+
         analyticsService.sendAnalytics(
                 DEV_MODE,
                 appModel,
                 Map.of(GRADLE_VERSION, getProject().getGradle().getGradleVersion()),
-                getProject().getBuildDir().getAbsoluteFile());
+                getProject().getLayout().getBuildDirectory().getAsFile().get());
 
         final Set<ArtifactKey> projectDependencies = new HashSet<>();
         for (ResolvedDependency localDep : DependenciesFilter.getReloadableModules(appModel)) {
@@ -545,6 +564,7 @@ public abstract class QuarkusDev extends QuarkusTask {
                         configuration.setCanBeConsumed(false);
                         configuration.extendsFrom(platformConfig);
                         configuration.getDependencies().add(getQuarkusGradleBootstrapResolver());
+                        configuration.getDependencies().add(getQuarkusMavenBootstrapResolver());
                         configuration.getDependencies().add(getQuarkusCoreDeployment(appModel));
                     });
             devModeDependencyConfiguration = getProject().getConfigurations()
@@ -568,7 +588,15 @@ public abstract class QuarkusDev extends QuarkusTask {
     }
 
     private Dependency getQuarkusGradleBootstrapResolver() {
-        final String pomPropsPath = "META-INF/maven/io.quarkus/quarkus-bootstrap-gradle-resolver/pom.properties";
+        return getQuarkusBootstrapResolver("quarkus-bootstrap-gradle-resolver");
+    }
+
+    private Dependency getQuarkusMavenBootstrapResolver() {
+        return getQuarkusBootstrapResolver("quarkus-bootstrap-maven-resolver");
+    }
+
+    private Dependency getQuarkusBootstrapResolver(String artifactId) {
+        final String pomPropsPath = "META-INF/maven/io.quarkus/" + artifactId + "/pom.properties";
         final InputStream devModePomPropsIs = DevModeMain.class.getClassLoader().getResourceAsStream(pomPropsPath);
         if (devModePomPropsIs == null) {
             throw new GradleException("Failed to locate " + pomPropsPath + " on the classpath");
@@ -591,9 +619,8 @@ public abstract class QuarkusDev extends QuarkusTask {
         if (devModeVersion == null) {
             throw new GradleException("Classpath resource " + pomPropsPath + " is missing version");
         }
-        Dependency gradleResolverDep = getProject().getDependencies()
+        return getProject().getDependencies()
                 .create(String.format("%s:%s:%s", devModeGroupId, devModeArtifactId, devModeVersion));
-        return gradleResolverDep;
     }
 
     private Dependency getQuarkusCoreDeployment(ApplicationModel appModel) {

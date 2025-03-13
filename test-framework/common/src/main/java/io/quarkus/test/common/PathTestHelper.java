@@ -168,16 +168,18 @@ public final class PathTestHelper {
      * @return directory or JAR containing the application being tested by the test class
      */
     public static Path getAppClassLocation(Class<?> testClass) {
-        return getAppClassLocationForTestLocation(getTestClassesLocation(testClass).toString());
+        return getAppClassLocationForTestLocation(getTestClassesLocation(testClass));
     }
 
     /**
      * Resolves the directory or the JAR file containing the application being tested by a test from the given location.
      *
-     * @param testClassLocation the test class location
+     * @param testClassLocationPath the test class location
      * @return directory or JAR containing the application being tested by a test from the given location
      */
-    public static Path getAppClassLocationForTestLocation(String testClassLocation) {
+    public static Path getAppClassLocationForTestLocation(Path testClassLocationPath) {
+        String testClassLocation = testClassLocationPath.toString();
+
         if (testClassLocation.endsWith(".jar")) {
             if (testClassLocation.endsWith("-tests.jar")) {
                 return Paths.get(new StringBuilder()
@@ -185,7 +187,7 @@ public final class PathTestHelper {
                         .append(".jar")
                         .toString());
             }
-            return Path.of(testClassLocation);
+            return testClassLocationPath;
         }
         Optional<Path> mainClassesDir = TEST_TO_MAIN_DIR_FRAGMENTS.entrySet().stream()
                 .filter(e -> testClassLocation.contains(e.getKey()))
@@ -209,7 +211,7 @@ public final class PathTestHelper {
         }
         // could be a custom test classes dir under the 'target' dir with the main
         // classes still under 'target/classes'
-        p = Path.of(testClassLocation).getParent();
+        p = testClassLocationPath.getParent();
         if (p != null && p.getFileName().toString().equals(TARGET)) {
             p = p.resolve("classes");
             if (Files.exists(p)) {

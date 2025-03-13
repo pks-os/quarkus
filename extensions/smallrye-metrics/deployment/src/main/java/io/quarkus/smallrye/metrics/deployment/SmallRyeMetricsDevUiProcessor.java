@@ -19,14 +19,14 @@ public class SmallRyeMetricsDevUiProcessor {
     @BuildStep(onlyIf = IsDevelopment.class)
     @Record(ExecutionTime.STATIC_INIT)
     CardPageBuildItem create(NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
-            ManagementInterfaceBuildTimeConfig managementInterfaceBuildTimeConfig,
+            ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
             SmallRyeMetricsConfig config,
             LaunchModeBuildItem launchModeBuildItem,
             SmallRyeMetricsRecorder unused) {
         CardPageBuildItem pageBuildItem = new CardPageBuildItem();
 
         var path = nonApplicationRootPathBuildItem.resolveManagementPath(config.path(),
-                managementInterfaceBuildTimeConfig, launchModeBuildItem);
+                managementBuildTimeConfig, launchModeBuildItem);
         pageBuildItem.addPage(Page.externalPageBuilder("All Metrics")
                 .icon("font-awesome-solid:chart-line")
                 .url(path));

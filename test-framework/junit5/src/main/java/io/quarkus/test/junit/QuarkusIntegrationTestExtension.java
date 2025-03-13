@@ -8,7 +8,7 @@ import static io.quarkus.test.junit.IntegrationTestUtil.determineTestProfileAndP
 import static io.quarkus.test.junit.IntegrationTestUtil.doProcessTestInstance;
 import static io.quarkus.test.junit.IntegrationTestUtil.ensureNoInjectAnnotationIsUsed;
 import static io.quarkus.test.junit.IntegrationTestUtil.findProfile;
-import static io.quarkus.test.junit.IntegrationTestUtil.getArtifactType;
+import static io.quarkus.test.junit.IntegrationTestUtil.getEffectiveArtifactType;
 import static io.quarkus.test.junit.IntegrationTestUtil.getSysPropsToRestore;
 import static io.quarkus.test.junit.IntegrationTestUtil.handleDevServices;
 import static io.quarkus.test.junit.IntegrationTestUtil.readQuarkusArtifactProperties;
@@ -137,7 +137,7 @@ public class QuarkusIntegrationTestExtension extends AbstractQuarkusTestWithCont
 
     private QuarkusTestExtensionState ensureStarted(ExtensionContext extensionContext) {
         Class<?> testClass = extensionContext.getRequiredTestClass();
-        ensureNoInjectAnnotationIsUsed(testClass);
+        ensureNoInjectAnnotationIsUsed(testClass, "@QuarkusIntegrationTest");
         Properties quarkusArtifactProperties = readQuarkusArtifactProperties(extensionContext);
 
         QuarkusTestExtensionState state = getState(extensionContext);
@@ -190,9 +190,9 @@ public class QuarkusIntegrationTestExtension extends AbstractQuarkusTestWithCont
             throws Throwable {
         JBossVersion.disableVersionLogging();
 
-        String artifactType = getArtifactType(quarkusArtifactProperties);
-
         SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+        String artifactType = getEffectiveArtifactType(quarkusArtifactProperties, config);
+
         TestConfig testConfig = config.getConfigMapping(TestConfig.class);
         boolean isDockerLaunch = isContainer(artifactType)
                 || (isJar(artifactType) && "test-with-native-agent".equals(testConfig.integrationTestProfile()));
@@ -263,10 +263,14 @@ public class QuarkusIntegrationTestExtension extends AbstractQuarkusTestWithCont
                                 } else {
                                     System.setProperty(i.getKey(), i.getValue());
                                 }
+                                // recalculate the property names that may have changed with the restore
+                                ConfigProvider.getConfig().unwrap(SmallRyeConfig.class).getLatestPropertyNames();
                             }
                         }
                     });
             additionalProperties.putAll(resourceManagerProps);
+            // recalculate the property names that may have changed with testProfileAndProperties.properties
+            ConfigProvider.getConfig().unwrap(SmallRyeConfig.class).getLatestPropertyNames();
 
             ArtifactLauncher<?> launcher;
             String testHost = System.getProperty("quarkus.http.test-host");

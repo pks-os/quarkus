@@ -44,8 +44,14 @@
         },
         {
             "category": "Data7",
-            "timeout": 85,
-            "test-modules": "reactive-oracle-client, reactive-mysql-client, reactive-db2-client, hibernate-reactive-db2, hibernate-reactive-mariadb, hibernate-reactive-mysql, hibernate-reactive-mysql-agroal-flyway, hibernate-reactive-panache, hibernate-reactive-panache-kotlin",
+            "timeout": 95,
+            "test-modules": "reactive-oracle-client, reactive-mysql-client, reactive-db2-client, hibernate-reactive-db2, hibernate-reactive-mariadb, hibernate-reactive-mssql, hibernate-reactive-mysql, hibernate-reactive-mysql-agroal-flyway, hibernate-reactive-panache, hibernate-reactive-panache-kotlin, hibernate-reactive-oracle",
+            "os-name": "ubuntu-latest"
+        },
+        {
+            "category": "Build tools and DevTools",
+            "timeout": 75,
+            "test-modules": "maven, gradle, devtools-registry-client",
             "os-name": "ubuntu-latest"
         },
         {
@@ -137,12 +143,6 @@
             "timeout": 50,
             "test-modules": "resteasy-jackson, qute, liquibase",
             "os-name": "windows-latest"
-        },
-        {
-            "category": "Build tools and DevTools",
-            "timeout": 75,
-            "test-modules": "maven, gradle, devtools-registry-client",
-            "os-name": "ubuntu-latest"
         },
         {
             "category": "AWT, ImageIO and Java2D, Packaging .so files",

@@ -104,7 +104,7 @@ public class GrpcClientProcessor {
     @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
     void setUpStork(GrpcStorkRecorder storkRecorder, GrpcClientBuildTimeConfig config) {
-        storkRecorder.init(config.storkProactiveConnections);
+        storkRecorder.init(config.storkProactiveConnections());
     }
 
     @BuildStep
@@ -435,6 +435,11 @@ public class GrpcClientProcessor {
     @BuildStep
     UnremovableBeanBuildItem unremovableClientInterceptors() {
         return UnremovableBeanBuildItem.beanTypes(GrpcDotNames.CLIENT_INTERCEPTOR);
+    }
+
+    @BuildStep
+    UnremovableBeanBuildItem unremovableChannelBuilderCustomizers() {
+        return UnremovableBeanBuildItem.beanTypes(GrpcDotNames.CHANNEL_BUILDER_CUSTOMIZER);
     }
 
     Set<String> getRegisteredInterceptors(InjectionPointInfo injectionPoint) {

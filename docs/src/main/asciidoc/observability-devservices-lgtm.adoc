@@ -10,8 +10,13 @@ include::_attributes.adoc[]
 :topics: observability,grafana,lgtm,otlp,opentelemetry,devservices,micrometer
 :extensions: io.quarkus:quarkus-observability-devservices
 
-This Dev Service provides the https://github.com/grafana/docker-otel-lgtm[Grafana OTel-LGTM], an `all-in-one` Docker image containing an https://opentelemetry.io/docs/collector[OpenTelemetry Collector] receiving and then forwarding telemetry data to https://prometheus.io/[Prometheus] (metrics), https://github.com/grafana/tempo[Tempo] (traces) and https://github.com/grafana/loki[Loki] (logs).
-This data can then be visualized by https://github.com/grafana/grafana[Grafana].
+This Dev Service provides the https://github.com/grafana/docker-otel-lgtm[Grafana OTel-LGTM], an `all-in-one` Docker image containing an https://opentelemetry.io/docs/collector[OpenTelemetry Collector] receiving and then forwarding telemetry data to Prometheus (metrics), Tempo (traces) and Loki (logs).
+This data can then be visualized by https://github.com/grafana/grafana[Grafana]. The LGTM abbreviation stands for:
+
+- L -> https://github.com/grafana/loki[Loki] (logs)
+- G -> https://github.com/grafana/grafana[Grafana] (metrics visualization)
+- T -> https://github.com/grafana/tempo[Tempo] (traces)
+- M -> https://grafana.com/oss/mimir[Mimir] (long term storage for Prometheus)
 
 == Configuring your project
 
@@ -163,19 +168,21 @@ image::observability-grafana-loki.png[alt=Dev UI LGTM, align=center,width=90%]
 
 === The dashboards
 
-The Dev Service includes a set of dashboards for metrics.
+The Dev Service includes a set of dashboards.
 
 image::observability-grafana-dashboards.png[alt=Dev UI LGTM, align=center,width=90%]
 
 Each dashboard is tuned for the specific application setup. The available dashboards are:
 
-* *Quarkus Micrometer Metrics - OTLP*: to be used with the Micrometer OTLP registry extension
-* *Quarkus Micrometer Metrics - Prometheus*: to be used with the Micrometer Prometheus registry extension.
-* *Quarkus Micrometer OpenTelemetry*: to be used with the Micrometer to OpenTelemetry bridge extension.
+* *Quarkus Micrometer OpenTelemetry*: to be used with the Micrometer and OpenTelemetry extension.
+* *Quarkus Micrometer OTLP registry*: to be used with the Micrometer OTLP registry extension.
+* *Quarkus Micrometer Prometheus registry*: to be used with the Micrometer Prometheus registry extension.
+* *Quarkus OpenTelemetry Logging*: to view logs coming from the OpenTelemetry extension.
+
 
 [NOTE]
 ====
-Some panels in the dashboards might take a few minutes to show data when their values are calculated over a sliding window of time.
+Some panels in the dashboards might take a few minutes to show accurate data when their values are calculated over a sliding  time window.
 ====
 
 === Additional configuration

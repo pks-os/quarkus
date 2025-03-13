@@ -1,7 +1,7 @@
 package io.quarkus.oidc.client.runtime;
 
 import java.io.IOException;
-import java.net.ConnectException;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.time.Instant;
@@ -244,7 +244,7 @@ public class OidcClientImpl implements OidcClient {
         // Retry up to three times with a one-second delay between the retries if the connection is closed
         Buffer buffer = OidcCommonUtils.encodeForm(body);
         Uni<HttpResponse<Buffer>> response = filterHttpRequest(requestProps, endpointType, request, buffer).sendBuffer(buffer)
-                .onFailure(ConnectException.class)
+                .onFailure(SocketException.class)
                 .retry()
                 .atMost(oidcConfig.connectionRetryCount())
                 .onFailure().transform(t -> {
@@ -286,6 +286,9 @@ public class OidcClientImpl implements OidcClient {
         if (expiresAt == null && oidcConfig.accessTokenExpiresIn().isPresent()) {
             final long now = System.currentTimeMillis() / 1000;
             expiresAt = now + oidcConfig.accessTokenExpiresIn().get().toSeconds();
+        }
+        if (expiresAt != null && oidcConfig.accessTokenExpirySkew().isPresent()) {
+            expiresAt += oidcConfig.accessTokenExpirySkew().get().getSeconds();
         }
         return expiresAt;
     }

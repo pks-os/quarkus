@@ -13,7 +13,6 @@ import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.ConfigurationBuildItem;
 import io.quarkus.deployment.builditem.RuntimeConfigSetupCompleteBuildItem;
 import io.quarkus.devservices.oidc.OidcDevServicesConfigBuildItem;
 import io.quarkus.devui.spi.JsonRPCProvidersBuildItem;
@@ -27,7 +26,7 @@ import io.quarkus.oidc.runtime.providers.KnownOidcProviders;
 import io.quarkus.runtime.configuration.ConfigUtils;
 import io.quarkus.vertx.core.deployment.CoreVertxBuildItem;
 import io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem;
-import io.quarkus.vertx.http.runtime.HttpConfiguration;
+import io.quarkus.vertx.http.runtime.VertxHttpConfig;
 
 public class OidcDevUIProcessor extends AbstractDevUIProcessor {
 
@@ -49,11 +48,10 @@ public class OidcDevUIProcessor extends AbstractDevUIProcessor {
     @Consume(CoreVertxBuildItem.class) // metadata discovery requires Vertx instance
     @Consume(RuntimeConfigSetupCompleteBuildItem.class)
     void prepareOidcDevConsole(Capabilities capabilities,
-            HttpConfiguration httpConfiguration,
+            VertxHttpConfig httpConfig,
             BeanContainerBuildItem beanContainer,
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
             BuildProducer<CardPageBuildItem> cardPageProducer,
-            ConfigurationBuildItem configurationBuildItem,
             OidcDevUiRecorder recorder,
             Optional<OidcDevServicesConfigBuildItem> oidcDevServicesConfigBuildItem) {
         if (!isOidcTenantEnabled() || (!isClientIdSet() && oidcDevServicesConfigBuildItem.isEmpty())) {
@@ -88,12 +86,11 @@ public class OidcDevUIProcessor extends AbstractDevUIProcessor {
                     oidcConfig.devui().webClientTimeout(),
                     oidcConfig.devui().grantOptions(),
                     nonApplicationRootPathBuildItem,
-                    configurationBuildItem,
                     keycloakAdminUrl,
                     null,
                     null,
                     true,
-                    httpConfiguration, discoverMetadata, authServerUrl);
+                    httpConfig, discoverMetadata, authServerUrl);
             cardPageProducer.produce(cardPage);
         }
     }

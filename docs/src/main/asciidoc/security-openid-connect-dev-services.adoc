@@ -126,6 +126,16 @@ Sometimes, ID tokens are forwarded to application frontends as bearer tokens.
 This helps endpoints identify the user logged into SPA or perform out-of-band token verification.
 Choose the *With ID Token* option in such cases.
 
+[NOTE]
+====
+When you import custom Keycloak realms, you may find, after inspecting both the access and ID tokens in Dev UI, that only the access token contains the list of roles in its `groups` claim.
+This information is important for accessing endpoints that are secured with the `@RolesAllowed` annotation.
+To tell Keycloak to include this information in the ID token, add the `microprofile-jwt` scope to the list of client scopes in the Keycloak admin console.
+Alternatively, add the `microprofile-jwt` scope to the list of required scopes using the `quarkus.oidc.authentication.scopes` property.
+
+For more information, see the https://www.keycloak.org/docs/latest/server_admin/#protocol[Keycloak server administration guide].
+====
+
 Manually entering the service paths is not ideal.
 For information about enabling Swagger or GraphQL UI for testing the service with the access token already acquired by the OIDC Dev UI, see the <<test-with-swagger-graphql,Test with Swagger UI or GraphQL UI>> section.
 
@@ -232,7 +242,7 @@ For more information, see xref:security-oidc-bearer-token-authentication.adoc#be
 [[keycloak-initialization]]
 === Keycloak initialization
 
-The `quay.io/keycloak/keycloak:26.0.7` image which contains a Keycloak distribution powered by Quarkus is used to start a container by default.
+The `quay.io/keycloak/keycloak:26.1.3` image which contains a Keycloak distribution powered by Quarkus is used to start a container by default.
 `quarkus.keycloak.devservices.image-name` can be used to change the Keycloak image name.
 For example, set it to `quay.io/keycloak/keycloak:19.0.3-legacy` to use a Keycloak distribution powered by WildFly.
 Be aware that a Quarkus-based Keycloak distribution is only available starting from Keycloak `20.0.0`.
@@ -421,6 +431,10 @@ Another option is log in as a custom user with the username and roles of your ch
 image::dev-ui-oidc-dev-svc-login-for-custom-users.png[alt=Dev Services for OIDC custom user login,role="center"]
 
 Whichever user you choose, no password is required.
+
+== Configuration reference
+
+include::{generated-dir}/config/quarkus-devservices-keycloak_quarkus.keycloak.adoc[opts=optional, leveloffset=+1]
 
 == References
 
