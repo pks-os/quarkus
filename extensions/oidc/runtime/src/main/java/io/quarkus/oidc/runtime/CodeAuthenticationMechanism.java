@@ -338,13 +338,15 @@ public class CodeAuthenticationMechanism extends AbstractOidcAuthenticationMecha
         context.put(TenantConfigContext.class.getName(), configContext);
         return resolver.getTokenStateManager().getTokens(context, configContext.oidcConfig(),
                 sessionCookie, getTokenStateRequestContext)
-                .onFailure(AuthenticationCompletionException.class)
+                .onFailure(Throwable.class)
                 .recoverWithUni(
                         new Function<Throwable, Uni<? extends AuthorizationCodeTokens>>() {
                             @Override
                             public Uni<AuthorizationCodeTokens> apply(Throwable t) {
+                                Throwable failure = t instanceof AuthenticationFailedException ? t
+                                        : new AuthenticationFailedException(t);
                                 return removeSessionCookie(context, configContext.oidcConfig())
-                                        .replaceWith(Uni.createFrom().failure(t));
+                                        .replaceWith(Uni.createFrom().failure(failure));
                             }
                         })
                 .chain(new Function<AuthorizationCodeTokens, Uni<? extends SecurityIdentity>>() {
@@ -1510,11 +1512,13 @@ public class CodeAuthenticationMechanism extends AbstractOidcAuthenticationMecha
             if (isRpInitiatedLogout(context, configContext)) {
                 LOG.debug("Performing an RP initiated logout");
                 fireEvent(SecurityEvent.Type.OIDC_LOGOUT_RP_INITIATED, identity);
+                OidcUtils.setClearSiteData(context, configContext.oidcConfig());
                 return buildLogoutRedirectUriUni(context, configContext, idToken);
             }
             if (isBackChannelLogoutPendingAndValid(configContext, identity)
                     || isFrontChannelLogoutValid(context, configContext,
                             identity)) {
+                OidcUtils.setClearSiteData(context, configContext.oidcConfig());
                 return removeSessionCookie(context, configContext.oidcConfig())
                         .map(new Function<Void, Void>() {
                             @Override
@@ -1526,5 +1530,6 @@ public class CodeAuthenticationMechanism extends AbstractOidcAuthenticationMecha
             }
             return VOID_UNI;
         }
+
     }
 }

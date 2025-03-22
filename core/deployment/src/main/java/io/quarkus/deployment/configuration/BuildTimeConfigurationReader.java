@@ -31,6 +31,9 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -166,6 +169,8 @@ public final class BuildTimeConfigurationReader {
         runTimeMappings = new ArrayList<>();
 
         Map<Class<?>, GroupDefinition> groups = new HashMap<>();
+        Set<String> legacyConfigRoots = new TreeSet<>();
+
         for (Class<?> configRoot : configRoots) {
             boolean isMapping = configRoot.isAnnotationPresent(ConfigMapping.class);
             if (isMapping) {
@@ -220,6 +225,17 @@ public final class BuildTimeConfigurationReader {
                 assert phase == ConfigPhase.RUN_TIME;
                 runTimeRoots.add(definition);
             }
+
+            if (configRoot.getAnnotation(Deprecated.class) == null) {
+                legacyConfigRoots.add(configRoot.getName());
+            }
+        }
+
+        if (!legacyConfigRoots.isEmpty()) {
+            log.warn(
+                    "The following config roots are using the legacy configuration classes infrastructure and should be adjusted to use an interface and @ConfigMapping.\n"
+                            + "See https://quarkus.io/guides/writing-extensions#configuration for more information. Please report this issue to their respective owners.\n\n"
+                            + legacyConfigRoots.stream().collect(Collectors.joining("\n- ", "- ", "")));
         }
 
         // ConfigRoots
@@ -620,9 +636,39 @@ public final class BuildTimeConfigurationReader {
                 }
             }
 
+            // Always record properties coming from Runtime Properties
+            config.getConfigSource("PropertiesConfigSource[source=Runtime Properties]").ifPresent(
+                    new Consumer<ConfigSource>() {
+                        @Override
+                        public void accept(final ConfigSource configSource) {
+                            for (String propertyName : configSource.getPropertyNames()) {
+                                ConfigValue configValue = withoutExpansion(() -> runtimeConfig.getConfigValue(propertyName));
+                                if (configValue.getValue() != null) {
+                                    runTimeValues.put(propertyName, configValue);
+                                }
+                            }
+                        }
+                    });
+
             // Remove properties coming from the Build System, because most likely they are used in build scripts
+            Iterable<ConfigSource> configSources = config.getConfigSources();
             config.getConfigSource("PropertiesConfigSource[source=Build system]").ifPresent(
-                    configSource -> unknownBuildProperties.removeAll(configSource.getPropertyNames()));
+                    new Consumer<ConfigSource>() {
+                        @Override
+                        public void accept(final ConfigSource buildSystem) {
+                            outer: for (String propertyName : buildSystem.getPropertyNames()) {
+                                for (ConfigSource configSource : configSources) {
+                                    if (configSource.equals(buildSystem)) {
+                                        continue;
+                                    }
+                                    if (configSource.getPropertyNames().contains(propertyName)) {
+                                        continue outer;
+                                    }
+                                }
+                                unknownBuildProperties.remove(propertyName);
+                            }
+                        }
+                    });
 
             // ConfigMappings
             for (ConfigClass mapping : buildTimeVisibleMappings) {

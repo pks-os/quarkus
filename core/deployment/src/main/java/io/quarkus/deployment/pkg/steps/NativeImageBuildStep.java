@@ -1,5 +1,7 @@
 package io.quarkus.deployment.pkg.steps;
 
+import static io.quarkus.deployment.builditem.nativeimage.UnsupportedOSBuildItem.Arch.AMD64;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -855,12 +857,16 @@ public class NativeImageBuildStep {
                 addExperimentalVMOption(nativeImageArgs, "-H:+AllowFoldMethods");
 
                 /*
+                 * @formatter:off
                  * Foreign Function and Memory API in Native Image, JDK's JEP 454
                  * This is needed for JDK 24+ internal native calls due to AWT,
                  * e.g. JDK-8337237 et al.
-                 *
+                 * Note GraalVM FFI/FFM support per platform prior to JDK 25 and JDK 25+
+                 * https://www.graalvm.org/latest/reference-manual/native-image/native-code-interoperability/foreign-interface/#foreign-functions
+                 * @formatter:on
                  */
-                if (graalVMVersion.compareTo(GraalVM.Version.VERSION_24_2_0) >= 0) {
+                if ((graalVMVersion.compareTo(io.quarkus.runtime.graal.GraalVM.Version.VERSION_24_2_0) >= 0 && AMD64.active) ||
+                        graalVMVersion.compareTo(io.quarkus.runtime.graal.GraalVM.Version.VERSION_25_0_0) >= 0) {
                     addExperimentalVMOption(nativeImageArgs, "-H:+ForeignAPISupport");
                 }
 
@@ -967,10 +973,6 @@ public class NativeImageBuildStep {
                 if (nativeConfig.monitoring().isPresent()) {
                     monitoringOptions.addAll(nativeConfig.monitoring().get());
                 }
-
-                nativeImageArgs.add("-J-Dquarkus.native.jmxserver.included="
-                        + monitoringOptions.contains(NativeConfig.MonitoringOption.JMXSERVER));
-
                 if (!monitoringOptions.isEmpty()) {
                     nativeImageArgs.add("--enable-monitoring=" + monitoringOptions.stream()
                             .map(o -> o.name().toLowerCase(Locale.ROOT)).collect(Collectors.joining(",")));
