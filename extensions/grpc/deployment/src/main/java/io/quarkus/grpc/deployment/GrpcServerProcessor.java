@@ -86,6 +86,7 @@ import io.quarkus.grpc.runtime.health.GrpcHealthEndpoint;
 import io.quarkus.grpc.runtime.health.GrpcHealthStorage;
 import io.quarkus.grpc.runtime.supports.context.GrpcDuplicatedContextGrpcInterceptor;
 import io.quarkus.grpc.runtime.supports.context.GrpcRequestContextGrpcInterceptor;
+import io.quarkus.grpc.runtime.supports.context.RoutingContextGrpcInterceptor;
 import io.quarkus.grpc.runtime.supports.exc.DefaultExceptionHandlerProvider;
 import io.quarkus.grpc.runtime.supports.exc.ExceptionInterceptor;
 import io.quarkus.kubernetes.spi.KubernetesPortBuildItem;
@@ -565,6 +566,7 @@ public class GrpcServerProcessor {
             // Global interceptors are invoked before any of the per-service interceptors
             beans.produce(AdditionalBeanBuildItem.unremovableOf(GrpcRequestContextGrpcInterceptor.class));
             beans.produce(AdditionalBeanBuildItem.unremovableOf(GrpcDuplicatedContextGrpcInterceptor.class));
+            beans.produce(AdditionalBeanBuildItem.unremovableOf(RoutingContextGrpcInterceptor.class));
             features.produce(new FeatureBuildItem(GRPC_SERVER));
 
             if (capabilities.isPresent(Capability.SECURITY)) {
@@ -619,9 +621,12 @@ public class GrpcServerProcessor {
         // the rest, if anything stays, should be logged as problematic
         Set<String> superfluousInterceptors = new HashSet<>(interceptors.nonGlobalInterceptors);
 
+        // Remove our internal non-global interceptors
+        superfluousInterceptors.remove(RoutingContextGrpcInterceptor.class.getName());
+
         // Remove the metrics interceptors
-        for (String MICROMETER_INTERCEPTOR : MICROMETER_INTERCEPTORS) {
-            superfluousInterceptors.remove(MICROMETER_INTERCEPTOR);
+        for (String mi : MICROMETER_INTERCEPTORS) {
+            superfluousInterceptors.remove(mi);
         }
 
         List<AnnotationInstance> found = new ArrayList<>(index.getAnnotations(GrpcDotNames.REGISTER_INTERCEPTOR));
@@ -690,7 +695,9 @@ public class GrpcServerProcessor {
             LaunchModeBuildItem launchModeBuildItem,
             VertxWebRouterBuildItem routerBuildItem,
             VertxBuildItem vertx, Capabilities capabilities,
-            List<FilterBuildItem> filterBuildItems) {
+            List<FilterBuildItem> filterBuildItems,
+            // used to ensure that gRPC server starts after OTel has been set up
+            @SuppressWarnings("unused") BeanContainerBuildItem beanContainerBuildItem) {
 
         // Build the list of blocking methods per service implementation
         Map<String, List<String>> blocking = new HashMap<>();

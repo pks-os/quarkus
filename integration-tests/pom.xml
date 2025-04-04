@@ -170,6 +170,7 @@
                 <module>bouncycastle-fips</module>
                 <module>bouncycastle-fips-jsse</module>
                 <module>bouncycastle-jsse</module>
+                <module>compose-devservices</module>
                 <module>funqy-amazon-lambda</module>
                 <module>funqy-google-cloud-functions</module>
                 <module>class-transformer</module>
@@ -377,6 +378,7 @@
                 <module>opentelemetry-vertx</module>
                 <module>opentelemetry-reactive</module>
                 <module>opentelemetry-grpc</module>
+                <module>opentelemetry-grpc-only</module>
                 <module>opentelemetry-vertx-exporter</module>
                 <module>opentelemetry-reactive-messaging</module>
                 <module>opentelemetry-redis-instrumentation</module>

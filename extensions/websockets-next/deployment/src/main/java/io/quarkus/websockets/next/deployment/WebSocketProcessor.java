@@ -81,6 +81,7 @@ import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.GeneratedClassBuildItem;
 import io.quarkus.deployment.builditem.RuntimeConfigSetupCompleteBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyBuildItem;
 import io.quarkus.deployment.execannotations.ExecutionModelAnnotationsAllowedBuildItem;
 import io.quarkus.deployment.metrics.MetricsCapabilityBuildItem;
 import io.quarkus.gizmo.BytecodeCreator;
@@ -285,10 +286,11 @@ public class WebSocketProcessor {
     }
 
     @BuildStep
-    public void collectEndpoints(BeanArchiveIndexBuildItem beanArchiveIndex,
+    void collectEndpoints(BeanArchiveIndexBuildItem beanArchiveIndex,
             BeanDiscoveryFinishedBuildItem beanDiscoveryFinished,
             CallbackArgumentsBuildItem callbackArguments,
             TransformedAnnotationsBuildItem transformedAnnotations,
+            BuildProducer<ReflectiveHierarchyBuildItem> reflectiveHierarchy,
             BuildProducer<WebSocketEndpointBuildItem> endpoints) {
 
         IndexView index = beanArchiveIndex.getIndex();
@@ -386,6 +388,22 @@ public class WebSocketProcessor {
                         "The endpoint must declare at least one method annotated with @OnTextMessage, @OnBinaryMessage, @OnPingMessage, @OnPongMessage or @OnOpen: "
                                 + beanClass);
             }
+            if (onTextMessage != null) {
+                Type effectiveMessageType;
+                if (onTextMessage.isKotlinSuspendFunction()) {
+                    effectiveMessageType = onTextMessage.isReturnTypeUni()
+                            ? onTextMessage.returnType().asParameterizedType().arguments().get(0)
+                            : KotlinUtils.getKotlinSuspendMethodResult(onTextMessage.method);
+                } else if (onTextMessage.isReturnTypeUni() || onTextMessage.isReturnTypeMulti()) {
+                    effectiveMessageType = onTextMessage.returnType().asParameterizedType().arguments().get(0);
+                } else {
+                    effectiveMessageType = onTextMessage.returnType();
+                }
+                if (effectiveMessageType.kind() != Type.Kind.VOID && onTextMessage.getOutputCodec() == null) {
+                    reflectiveHierarchy
+                            .produce(ReflectiveHierarchyBuildItem.builder(effectiveMessageType).build());
+                }
+            }
             endpoints.produce(new WebSocketEndpointBuildItem(target == Target.CLIENT, bean, path, id,
                     inboundProcessingMode != null ? InboundProcessingMode.valueOf(inboundProcessingMode.asEnum())
                             : InboundProcessingMode.SERIAL,
@@ -400,7 +418,7 @@ public class WebSocketProcessor {
     }
 
     @BuildStep
-    public void validateConnectorInjectionPoints(List<WebSocketEndpointBuildItem> endpoints,
+    void validateConnectorInjectionPoints(List<WebSocketEndpointBuildItem> endpoints,
             ValidationPhaseBuildItem validationPhase, BuildProducer<ValidationErrorBuildItem> validationErrors) {
         for (InjectionPointInfo injectionPoint : validationPhase.getContext().getInjectionPoints()) {
             if (injectionPoint.getRequiredType().name().equals(WebSocketDotNames.WEB_SOCKET_CONNECTOR)
@@ -420,7 +438,7 @@ public class WebSocketProcessor {
     }
 
     @BuildStep
-    public void generateEndpoints(BeanArchiveIndexBuildItem index, List<WebSocketEndpointBuildItem> endpoints,
+    void generateEndpoints(BeanArchiveIndexBuildItem index, List<WebSocketEndpointBuildItem> endpoints,
             CallbackArgumentsBuildItem argumentProviders,
             TransformedAnnotationsBuildItem transformedAnnotations,
             GlobalErrorHandlersBuildItem globalErrorHandlers,
@@ -466,7 +484,7 @@ public class WebSocketProcessor {
     @Consume(SyntheticBeansRuntimeInitBuildItem.class) // SecurityHttpUpgradeCheck is runtime init due to runtime config
     @Record(RUNTIME_INIT)
     @BuildStep
-    public void registerRoutes(WebSocketServerRecorder recorder, List<WebSocketEndpointBuildItem> endpoints,
+    void registerRoutes(WebSocketServerRecorder recorder, List<WebSocketEndpointBuildItem> endpoints,
             List<GeneratedEndpointBuildItem> generatedEndpoints, WebSocketsServerBuildConfig config,
             ValidationPhaseBuildItem validationPhase, BuildProducer<RouteBuildItem> routes,
             Optional<PermissionsAllowedMetaAnnotationBuildItem> metaPermissionsAllowed,

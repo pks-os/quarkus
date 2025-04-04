@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -202,17 +203,19 @@ public class Channels {
                 builder = NettyChannelBuilder.forTarget(target);
             }
 
+            Map<String, Object> configMap = new LinkedHashMap<>();
             for (ChannelBuilderCustomizer customizer : channelBuilderCustomizers) {
                 Map<String, Object> map = customizer.customize(name, config, builder);
-                builder.defaultServiceConfig(map);
+                configMap.putAll(map);
             }
+            builder.defaultServiceConfig(configMap);
 
             if (config.useVertxEventLoop() && builder instanceof NettyChannelBuilder) {
                 NettyChannelBuilder ncBuilder = (NettyChannelBuilder) builder;
                 // just use the existing Vertx event loop group, if possible
                 Vertx vertx = container.instance(Vertx.class).get();
                 // only support NIO for now, since Vertx::transport is not exposed in the API
-                if (vertx != null && vertx.isNativeTransportEnabled()) {
+                if (vertx != null && !vertx.isNativeTransportEnabled()) {
                     // see https://github.com/eclipse-vertx/vert.x/pull/5292
                     boolean reuseNettyAllocators = Boolean.getBoolean("vertx.reuseNettyAllocators");
                     if (reuseNettyAllocators) {
